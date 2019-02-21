@@ -216,7 +216,7 @@ func kubernetesAddonSettingsInit(profile *api.Properties) []kubernetesFeatureSet
 }
 
 func kubernetesManifestSettingsInit(profile *api.Properties) []kubernetesFeatureSetting {
-	return []kubernetesFeatureSetting{
+	settings := []kubernetesFeatureSetting{
 		{
 			"kubernetesmaster-kube-scheduler.yaml",
 			"kube-scheduler.yaml",
@@ -254,6 +254,19 @@ func kubernetesManifestSettingsInit(profile *api.Properties) []kubernetesFeature
 			"",
 		},
 	}
+
+	kubeControllerManager := kubernetesFeatureSetting{
+		"kubernetesmaster-kube-controller-manager.yaml",
+		"kube-controller-manager.yaml",
+		true,
+		profile.OrchestratorProfile.KubernetesConfig.ControllerManagerConfig["data"],
+	}
+
+	if profile.IsAzureStackCloud() {
+		kubeControllerManager.sourceFile = "kubernetesmaster-kube-controller-manager-custom.yaml"
+	}
+	settings = append(settings, kubeControllerManager)
+	return settings
 }
 
 func kubernetesArtifactSettingsInitMaster(profile *api.Properties) []kubernetesFeatureSetting {
