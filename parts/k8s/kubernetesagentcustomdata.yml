@@ -211,7 +211,7 @@ write_files:
     - name: localcluster
       cluster:
         certificate-authority: /etc/kubernetes/certs/ca.crt
-        server: https://{{WrapAsVariable "kubernetesAPIServerIP"}}:443
+        server: https://<kubernetesAPIServerIP>:443
     users:
     - name: client
       user:
@@ -258,7 +258,13 @@ AGENT_ARTIFACTS_CONFIG_PLACEHOLDER
     sed -i "s|<searchDomainRealmUser>|{{WrapAsParameter "searchDomainRealmUser"}}|g" "/opt/azure/containers/setup-custom-search-domains.sh"
     sed -i "s|<searchDomainRealmPassword>|{{WrapAsParameter "searchDomainRealmPassword"}}|g" "/opt/azure/containers/setup-custom-search-domains.sh"
 {{end}}
-
+{{if IsAzureStackCloud}}
+    {{if IsMultipleMasters}}
+    sed -i "s|<kubernetesAPIServerIP>|{{WrapAsVariable "masterPublicLbFQDN"}}|g" "/var/lib/kubelet/kubeconfig"
+    {{else}}
+    sed -i "s|<kubernetesAPIServerIP>|{{WrapAsVariable "kubernetesAPIServerIP"}}|g" "/var/lib/kubelet/kubeconfig"
+    {{end}}
+{{end}}
 {{if IsAzureStackCloud}}
 - path: "/etc/kubernetes/azurestackcloud.json"
   permissions: "0600"

@@ -151,23 +151,9 @@
               "sourceAddressPrefix": "*",
               "sourcePortRange": "*"
             }
-          },
-          {
-            "name": "allow_kube_tls",
-            "properties": {
-              "access": "Allow",
-              "description": "Allow kube-apiserver (tls) traffic to master",
-              "destinationAddressPrefix": "*",
-              "destinationPortRange": "443-443",
-              "direction": "Inbound",
-              "priority": 100,
-              "protocol": "Tcp",
-              "sourceAddressPrefix": "*",
-              "sourcePortRange": "*"
-            }
-          }
+          },          
           {{if IsAzureStackCloud}}
-            ,{
+            {
               "name": "allow_portany_inbound",
               "properties": {
                 "access": "Allow",
@@ -194,8 +180,22 @@
                 "sourceAddressPrefix": "10.0.0.0/8",
                 "sourcePortRange": "*"
               }
-            }
+            },
         {{end}}
+        {
+            "name": "allow_kube_tls",
+            "properties": {
+              "access": "Allow",
+              "description": "Allow kube-apiserver (tls) traffic to master",
+              "destinationAddressPrefix": "*",
+              "destinationPortRange": "443-443",
+              "direction": "Inbound",
+              "priority": 100,
+              "protocol": "Tcp",
+              "sourceAddressPrefix": "*",
+              "sourcePortRange": "*"
+            }
+          }
         {{if IsFeatureEnabled "BlockOutboundInternet"}}
           ,{
             "name": "allow_vnet",

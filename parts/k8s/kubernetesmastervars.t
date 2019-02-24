@@ -265,6 +265,9 @@
         {{else}}
         "kubernetesAPIServerIP": "[concat(variables('masterFirstAddrPrefix'), add(variables('masterInternalLbIPOffset'), int(variables('masterFirstAddrOctet4'))))]",
         {{end}}
+        {{if IsAzureStackCloud}} 
+        "masterPublicLbFQDN": "[concat(variables('masterFqdnPrefix'), '.', variables('location'), '.', parameters('fqdnEndpointSuffix'))]", 
+        {{end}}
     {{else}}
       "kubernetesAPIServerIP": "[parameters('firstConsecutiveStaticIP')]",
     {{end}}
