@@ -151,34 +151,34 @@
               "sourceAddressPrefix": "*",
               "sourcePortRange": "*"
             }
-          },          
+          }
           {{if IsAzureStackCloud}}
-            {
-              "name": "allow_portany_inbound",
+            ,{
+              "name": "allow_vnet_inbound",
               "properties": {
                 "access": "Allow",
                 "description": "Allow traffic to specific addresses.",
                 "destinationAddressPrefix": "10.0.0.0/8",
-                "destinationPortRange": "*",
+                "destinationPortRange": "",
                 "direction": "Inbound",
                 "priority": 4095,
-                "protocol": "*",
+                "protocol": "",
                 "sourceAddressPrefix": "10.0.0.0/8",
-                "sourcePortRange": "*"
+                "sourcePortRange": ""
               }
             },
             {
-              "name": "allow_portany_outbound",
+              "name": "allow_vnet_outbound",
               "properties": {
                 "access": "Allow",
                 "description": "Allow traffic to specific addresses.",
                 "destinationAddressPrefix": "10.0.0.0/8",
-                "destinationPortRange": "*",
+                "destinationPortRange": "",
                 "direction": "Outbound",
                 "priority": 4095,
-                "protocol": "*",
+                "protocol": "",
                 "sourceAddressPrefix": "10.0.0.0/8",
-                "sourcePortRange": "*"
+                "sourcePortRange": ""
               }
             },
         {{end}}
@@ -195,7 +195,7 @@
               "sourceAddressPrefix": "*",
               "sourcePortRange": "*"
             }
-          }
+        }
         {{if IsFeatureEnabled "BlockOutboundInternet"}}
           ,{
             "name": "allow_vnet",
