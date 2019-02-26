@@ -152,7 +152,7 @@
               "sourcePortRange": "*"
             }
           },
-		  {
+          {
             "name": "allow_kube_tls",
             "properties": {
               "access": "Allow",
@@ -195,7 +195,7 @@
                 "sourcePortRange": "*"
               }
             }
-        {{end}}        
+        {{end}}
         {{if IsFeatureEnabled "BlockOutboundInternet"}}
           ,{
             "name": "allow_vnet",
