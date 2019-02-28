@@ -9,27 +9,7 @@
                 "kubernetesImageBase": "k8s.gcr.io/",
                 "customHyperkubeImage": "msazurestackqa/hyperkube-amd64:v1.11.7",
                 "useInstanceMetadata": false,
-                "networkPolicy": "none",
-                "addons": [
-                    {
-                        "name": "ip-masq-agent",
-                        "enabled": false,
-                        "containers": [
-                        {
-                            "name": "ip-masq-agent",
-                            "image": "k8s.gcr.io/ip-masq-agent-amd64:v2.0.0",
-                            "cpuRequests": "50m",
-                            "memoryRequests": "50Mi",
-                            "cpuLimits": "50m",
-                            "memoryLimits": "250Mi"
-                        }
-                    ],
-                        "config": {
-                            "non-masq-cni-cidr": "",
-                            "non-masquerade-cidr": "10.244.0.0/16"
-                        }
-                    }
-                ]
+                "networkPolicy": "none"
             }
         },
         "customCloudProfile": {
