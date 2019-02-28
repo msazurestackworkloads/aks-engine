@@ -220,6 +220,9 @@ func (t *TemplateGenerator) getTemplateFuncMap(cs *api.ContainerService) templat
 		"IsMasterVirtualMachineScaleSets": func() bool {
 			return cs.Properties.MasterProfile != nil && cs.Properties.MasterProfile.IsVirtualMachineScaleSets()
 		},
+		"IsMultipleMasters": func() bool {
+			return cs.Properties.MasterProfile != nil && cs.Properties.MasterProfile.Count > 1
+		},
 		"IsHostedMaster": func() bool {
 			return cs.Properties.IsHostedMasterProfile()
 		},
