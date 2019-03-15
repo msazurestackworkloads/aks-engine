@@ -55,7 +55,7 @@ type CustomCloudConfig struct {
 	KeyVaultDNSSuffix            string `envconfig:"KEY_VAULT_DNS_SUFFIX"`
 	GraphEndpoint                string `envconfig:"GRAPH_ENDPOINT"`
 	ServiceManagementVMDNSSuffix string `envconfig:"SERVICE_MANAGEMENT_VM_DNS_SUFFIX"`
-	ResourceManagerVMDNSSuffix   string `envconfig:"Resource_Manager_VM_DNS_Suffix"`
+	ResourceManagerVMDNSSuffix   string `envconfig:"RESOURCE_MANAGER_VM_DNS_SUFFIX"`
 	IdentitySystem               string `envconfig:"IDENTITY_SYSTEM"`
 	AuthenticationMethod         string `envconfig:"AUTHENTICATION_METHOD"`
 	VaultID                      string `envconfig:"VAULT_ID"`
