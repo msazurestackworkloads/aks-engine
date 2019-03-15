@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/api/vlabs"
 	"github.com/Azure/aks-engine/test/e2e/kubernetes/util"
 	"github.com/kelseyhightower/envconfig"
@@ -161,13 +162,13 @@ func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) erro
 	return nil
 }
 
-func parseVlabsContainerSerice(clusterDefinitionFullPath string) vlabs.ContainerService {
+func parseVlabsContainerSerice(clusterDefinitionFullPath string) api.VlabsARMContainerService {
 
 	bytes, err := ioutil.ReadFile(clusterDefinitionFullPath)
 	if err != nil {
 		log.Fatalf("Error while trying to read cluster definition at (%s):%s\n", clusterDefinitionFullPath, err)
 	}
-	cs := vlabs.ContainerService{}
+	cs := api.VlabsARMContainerService{}
 	err = json.Unmarshal(bytes, &cs)
 	if err != nil {
 		log.Fatalf("Fail to unmarshal file %q , err -  %q", clusterDefinitionFullPath, err)
