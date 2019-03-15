@@ -20,6 +20,7 @@ import (
 
 var (
 	cfg            *config.Config
+	cccfg          *config.CustomCloudConfig
 	acct           *azure.Account
 	eng            *engine.Engine
 	rgs            []string
@@ -37,12 +38,27 @@ func main() {
 	}
 	cfg.CurrentWorkingDir = cwd
 
+	if cfg.IsAzureStackCloud() {
+		cccfg, err = config.ParseCustomCloudConfig()
+		if err != nil {
+			log.Fatalf("Error while trying to parse custom cloud configuration: %s\n", err)
+		}
+		err = cfg.UpdateCustomCloudClusterDefinition(cccfg)
+		if err != nil {
+			log.Fatalf("Error while trying to update  cluster definition: %s\n", cfg.ClusterDefinition)
+		}
+		cccfg.SetEnvironment()
+		if err != nil {
+			log.Fatalf("Error while trying to set environment to azure account! %s\n", err)
+		}
+	}
+
 	acct, err = azure.NewAccount()
 	if err != nil {
 		log.Fatalf("Error while trying to setup azure account: %s\n", err)
 	}
 
-	err := acct.Login()
+	err = acct.Login()
 	if err != nil {
 		log.Fatalf("Error while trying to login to azure account! %s\n", err)
 	}

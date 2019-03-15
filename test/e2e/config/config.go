@@ -5,6 +5,8 @@ package config
 
 import (
 	"bufio"
+	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -15,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Azure/aks-engine/pkg/api/vlabs"
 	"github.com/Azure/aks-engine/test/e2e/kubernetes/util"
 	"github.com/kelseyhightower/envconfig"
 )
@@ -41,6 +44,29 @@ type Config struct {
 	GinkgoSkip          string `envconfig:"GINKGO_SKIP"`
 }
 
+// CustomCloudConfig holds configurations for custom clould
+type CustomCloudConfig struct {
+	ServiceManagementEndpoint    string `envconfig:"SERVICE_MANAGEMENT_ENDPOINT"`
+	ResourceManagerEndpoint      string `envconfig:"RESOURCE_MANAGER_ENDPOINT"`
+	ActiveDirectoryEndpoint      string `envconfig:"ACTIVE_DIRECTORY_ENDPOINT"`
+	GalleryEndpoint              string `envconfig:"GALLERY_ENDPOINT"`
+	StorageEndpointSuffix        string `envconfig:"STORAGE_ENDPOINT_SUFFIX"`
+	KeyVaultDNSSuffix            string `envconfig:"KEY_VAULT_DNS_SUFFIX"`
+	GraphEndpoint                string `envconfig:"GRAPH_ENDPOINT"`
+	ServiceManagementVMDNSSuffix string `envconfig:"SERVICE_MANAGEMENT_VM_DNS_SUFFIX"`
+	ResourceManagerVMDNSSuffix   string `envconfig:"Resource_Manager_VM_DNS_Suffix"`
+	IdentitySystem               string `envconfig:"IDENTITY_SYSTEM"`
+	AuthenticationMethod         string `envconfig:"AUTHENTICATION_METHOD"`
+	VaultID                      string `envconfig:"VAULT_ID"`
+	SecretName                   string `envconfig:"SECRET_NAME"`
+	LoginPemPath                 string `envconfig:"LOGIN_PEM_PATH"`
+	LoginPem                     string `envconfig:"LOGIN_PEM"`
+	CustomCloudClientID          string `envconfig:"CUSTOM_CLOUD_CLIENT_ID"`
+	CustomCloudSecret            string `envconfig:"CUSTOM_CLOUD_SECRET"`
+	APIProfile                   string `envconfig:"API_PROFILE"`
+	TimeoutCommands              bool
+}
+
 const (
 	kubernetesOrchestrator = "kubernetes"
 )
@@ -57,6 +83,15 @@ func ParseConfig() (*Config, error) {
 	return c, nil
 }
 
+// ParseCustomCloudConfig will parse needed environment variables for running the tests
+func ParseCustomCloudConfig() (*CustomCloudConfig, error) {
+	ccc := new(CustomCloudConfig)
+	if err := envconfig.Process("customcloudconfig", ccc); err != nil {
+		return nil, err
+	}
+	return ccc, nil
+}
+
 // GetKubeConfig returns the absolute path to the kubeconfig for c.Location
 func (c *Config) GetKubeConfig() string {
 	var kubeconfigPath string
@@ -67,6 +102,137 @@ func (c *Config) GetKubeConfig() string {
 		kubeconfigPath = filepath.Join(c.CurrentWorkingDir, "_output", c.Name, "kubeconfig", file)
 	}
 	return kubeconfigPath
+}
+
+// IsAzureStackCloud returns true if the cloud is AzureStack
+func (c *Config) IsAzureStackCloud() bool {
+	clusterDefinitionFullPath := fmt.Sprintf("%s/%s", c.CurrentWorkingDir, c.ClusterDefinition)
+	cs := parseVlabsContainerSerice(clusterDefinitionFullPath)
+	return cs.Properties.IsAzureStackCloud()
+}
+
+// UpdateCustomCloudClusterDefinition updates the cluster definition from environment variables
+func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) error {
+	clusterDefinitionFullPath := fmt.Sprintf("%s/%s", c.CurrentWorkingDir, c.ClusterDefinition)
+	cs := parseVlabsContainerSerice(clusterDefinitionFullPath)
+
+	cs.Location = c.Location
+	cs.Properties.CustomCloudProfile.Environment.ServiceManagementEndpoint = ccc.ServiceManagementEndpoint
+	cs.Properties.CustomCloudProfile.Environment.ResourceManagerEndpoint = ccc.ResourceManagerEndpoint
+	cs.Properties.CustomCloudProfile.Environment.ActiveDirectoryEndpoint = ccc.ActiveDirectoryEndpoint
+	cs.Properties.CustomCloudProfile.Environment.GalleryEndpoint = ccc.GalleryEndpoint
+	cs.Properties.CustomCloudProfile.Environment.GraphEndpoint = ccc.GraphEndpoint
+	cs.Properties.CustomCloudProfile.Environment.KeyVaultDNSSuffix = ccc.KeyVaultDNSSuffix
+	cs.Properties.CustomCloudProfile.Environment.ServiceManagementVMDNSSuffix = ccc.ServiceManagementVMDNSSuffix
+	cs.Properties.CustomCloudProfile.Environment.ResourceManagerVMDNSSuffix = ccc.ResourceManagerVMDNSSuffix
+
+	cs.Properties.ServicePrincipalProfile.ClientID = ccc.CustomCloudClientID
+	if ccc.IdentitySystem == "azure_ad" {
+		cs.Properties.ServicePrincipalProfile.Secret = ccc.CustomCloudSecret
+	}
+	if ccc.IdentitySystem == "adfs" {
+		cs.Properties.CustomCloudProfile.IdentitySystem = ccc.IdentitySystem
+		cs.Properties.CustomCloudProfile.AuthenticationMethod = ccc.AuthenticationMethod
+		cs.Properties.ServicePrincipalProfile.Secret = ""
+		cs.Properties.ServicePrincipalProfile.KeyvaultSecretRef = &vlabs.KeyvaultSecretRef{
+			VaultID:    ccc.VaultID,
+			SecretName: ccc.SecretName,
+		}
+
+		loginPemFullPath := fmt.Sprintf("%s/%s", c.CurrentWorkingDir, ccc.LoginPemPath)
+		decoded, err := base64.StdEncoding.DecodeString(ccc.LoginPem)
+		if err != nil {
+			return fmt.Errorf("decode error - %p", err)
+		}
+		err = ioutil.WriteFile(loginPemFullPath, decoded, 644)
+		if err != nil {
+			return fmt.Errorf("Error fail to write pem file %p", err)
+		}
+	}
+
+	csBytes, err := json.Marshal(cs)
+	if err != nil {
+		return fmt.Errorf("Error fail to marshal containerService object %p", err)
+	}
+	err = ioutil.WriteFile(clusterDefinitionFullPath, csBytes, 644)
+	if err != nil {
+		return fmt.Errorf("Error fail to write file object %p", err)
+	}
+	return nil
+}
+
+func parseVlabsContainerSerice(clusterDefinitionFullPath string) vlabs.ContainerService {
+
+	bytes, err := ioutil.ReadFile(clusterDefinitionFullPath)
+	if err != nil {
+		log.Fatalf("Error while trying to read cluster definition at (%s):%s\n", clusterDefinitionFullPath, err)
+	}
+	cs := vlabs.ContainerService{}
+	err = json.Unmarshal(bytes, &cs)
+	if err != nil {
+		log.Fatalf("Fail to unmarshal file %q , err -  %q", clusterDefinitionFullPath, err)
+	}
+	return cs
+}
+
+// SetEnvironment will set the cloud context
+func (ccc *CustomCloudConfig) SetEnvironment() error {
+	var cmd *exec.Cmd
+	environmentName := "AzureStack"
+	if ccc.TimeoutCommands {
+		cmd = exec.Command("timeout", "60", "az", "cloud", "register",
+			"-n", environmentName,
+			"--endpoint-resource-manager", ccc.ResourceManagerEndpoint,
+			"--suffix-storage-endpoint", ccc.StorageEndpointSuffix,
+			"--suffix-keyvault-dns", ccc.KeyVaultDNSSuffix,
+			"--endpoint-active-directory-resource-id", ccc.ServiceManagementEndpoint,
+			"--endpoint-active-directory", ccc.ActiveDirectoryEndpoint,
+			"--endpoint-active-directory-graph-resource-id", ccc.GraphEndpoint)
+	} else {
+		cmd = exec.Command("az", "cloud", "register",
+			"-n", environmentName,
+			"--endpoint-resource-manager", ccc.ResourceManagerEndpoint,
+			"--suffix-storage-endpoint", ccc.StorageEndpointSuffix,
+			"--suffix-keyvault-dns", ccc.KeyVaultDNSSuffix,
+			"--endpoint-active-directory-resource-id", ccc.ServiceManagementEndpoint,
+			"--endpoint-active-directory", ccc.ActiveDirectoryEndpoint,
+			"--endpoint-active-directory-graph-resource-id", ccc.GraphEndpoint)
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("output:%s\n", out)
+		return err
+	}
+
+	if ccc.TimeoutCommands {
+		cmd = exec.Command("timeout", "60", "az", "cloud", "set",
+			"-n", environmentName)
+
+	} else {
+		cmd = exec.Command("az", "cloud", "set",
+			"-n", environmentName)
+	}
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("output:%s\n", out)
+		return err
+	}
+
+	if ccc.TimeoutCommands {
+		cmd = exec.Command("timeout", "60", "az", "cloud", "update",
+			"--profile", ccc.APIProfile)
+
+	} else {
+		cmd = exec.Command("az", "cloud", "update",
+			"--profile", ccc.APIProfile)
+	}
+	out, err = cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("output:%s\n", out)
+		return err
+	}
+
+	return nil
 }
 
 // SetKubeConfig will set the KUBECONIFG env var
