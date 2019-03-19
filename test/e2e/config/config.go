@@ -166,7 +166,7 @@ func parseVlabsContainerSerice(clusterDefinitionFullPath string) api.VlabsARMCon
 // SetEnvironment will set the cloud context
 func (ccc *CustomCloudConfig) SetEnvironment() error {
 	var cmd *exec.Cmd
-	environmentName := "AzureStack"
+	environmentName := fmt.Sprintf("AzureStack%v", time.Now().Unix())
 	if ccc.TimeoutCommands {
 		cmd = exec.Command("timeout", "60", "az", "cloud", "register",
 			"-n", environmentName,
