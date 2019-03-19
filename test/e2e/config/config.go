@@ -5,7 +5,6 @@ package config
 
 import (
 	"bufio"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -60,8 +59,6 @@ type CustomCloudConfig struct {
 	AuthenticationMethod         string `envconfig:"AUTHENTICATION_METHOD"`
 	VaultID                      string `envconfig:"VAULT_ID"`
 	SecretName                   string `envconfig:"SECRET_NAME"`
-	LoginPemPath                 string `envconfig:"LOGIN_PEM_PATH"`
-	LoginPem                     string `envconfig:"LOGIN_PEM"`
 	CustomCloudClientID          string `envconfig:"CUSTOM_CLOUD_CLIENT_ID"`
 	CustomCloudSecret            string `envconfig:"CUSTOM_CLOUD_SECRET"`
 	APIProfile                   string `envconfig:"API_PROFILE"`
@@ -138,16 +135,6 @@ func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) erro
 		cs.Properties.ServicePrincipalProfile.KeyvaultSecretRef = &vlabs.KeyvaultSecretRef{
 			VaultID:    ccc.VaultID,
 			SecretName: ccc.SecretName,
-		}
-
-		loginPemFullPath := fmt.Sprintf("%s/%s", c.CurrentWorkingDir, ccc.LoginPemPath)
-		decoded, err := base64.StdEncoding.DecodeString(ccc.LoginPem)
-		if err != nil {
-			return fmt.Errorf("decode error - %p", err)
-		}
-		err = ioutil.WriteFile(loginPemFullPath, decoded, 644)
-		if err != nil {
-			return fmt.Errorf("Error fail to write pem file %p", err)
 		}
 	}
 
