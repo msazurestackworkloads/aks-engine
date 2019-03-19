@@ -155,7 +155,7 @@ func CreateMasterVMSS(cs *api.ContainerService) VirtualMachineScaleSetARM {
 		}
 	}
 
-	if !isAzureCNI {
+	if !isAzureCNI && !cs.Properties.IsAzureStackCloud() {
 		netintconfig.EnableIPForwarding = to.BoolPtr(true)
 	}
 
@@ -453,7 +453,7 @@ func CreateAgentVMSS(cs *api.ContainerService, profile *api.AgentPoolProfile) Vi
 		}
 	}
 
-	if !orchProfile.IsAzureCNI() {
+	if !orchProfile.IsAzureCNI() && !cs.Properties.IsAzureStackCloud() {
 		vmssNICConfig.EnableIPForwarding = to.BoolPtr(true)
 	}
 
