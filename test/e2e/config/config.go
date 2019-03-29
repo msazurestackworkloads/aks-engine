@@ -118,6 +118,11 @@ func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) erro
 	cs.Properties.CustomCloudProfile.Environment.ServiceManagementEndpoint = ccc.ServiceManagementEndpoint
 	cs.Properties.CustomCloudProfile.Environment.ResourceManagerEndpoint = ccc.ResourceManagerEndpoint
 	cs.Properties.CustomCloudProfile.Environment.ActiveDirectoryEndpoint = ccc.ActiveDirectoryEndpoint
+	if ccc.IdentitySystem == "adfs" {
+		trimStr := strings.TrimSuffix(ccc.ActiveDirectoryEndpoint, "/")
+		trimStr = strings.TrimSuffix(trimStr, "adfs")
+		cs.Properties.CustomCloudProfile.Environment.ActiveDirectoryEndpoint = trimStr
+	}
 	cs.Properties.CustomCloudProfile.Environment.GalleryEndpoint = ccc.GalleryEndpoint
 	cs.Properties.CustomCloudProfile.Environment.GraphEndpoint = ccc.GraphEndpoint
 	cs.Properties.CustomCloudProfile.Environment.KeyVaultDNSSuffix = ccc.KeyVaultDNSSuffix
