@@ -44,7 +44,6 @@
     },
     "servicePrincipalProfile": {
       "clientId": "clientId",
-      "secret": "secret"
   }
   }
 }
