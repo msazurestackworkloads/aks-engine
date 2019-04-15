@@ -30,6 +30,15 @@
         "distro": "ubuntu",
         "availabilityProfile": "AvailabilitySet",
         "AcceleratedNetworkingEnabled": false
+      },
+      {
+        "name": "linuxpool-test",
+        "osDiskSizeGB": 200,
+        "count": 0,
+        "vmSize": "Standard_D4_v2",
+        "distro": "ubuntu",
+        "availabilityProfile": "AvailabilitySet",
+        "AcceleratedNetworkingEnabled": false
       }
     ],
     "linuxProfile": {
