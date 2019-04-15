@@ -8,7 +8,7 @@
       "kubernetesConfig": {
           "kubernetesImageBase": "msazurestackqa/",
           "useInstanceMetadata": false,
-          "networkPolicy": "flannel"
+          "networkPlugin": "flannel"
       }
     },
     "customCloudProfile": {
