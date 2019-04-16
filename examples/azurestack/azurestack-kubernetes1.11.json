@@ -6,7 +6,7 @@
       "orchestratorType": "Kubernetes",
       "orchestratorRelease": "1.11",
       "kubernetesConfig": {
-          "customHyperkubeImage": "msazurestackdocker/,
+          "customHyperkubeImage": "msazurestackdocker/",
           "useInstanceMetadata": false,
           "networkPlugin": "flannel"
       }
