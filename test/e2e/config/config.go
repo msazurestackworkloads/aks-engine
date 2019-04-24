@@ -62,6 +62,7 @@ type CustomCloudConfig struct {
 	CustomCloudClientID          string `envconfig:"CUSTOM_CLOUD_CLIENT_ID"`
 	CustomCloudSecret            string `envconfig:"CUSTOM_CLOUD_SECRET"`
 	APIProfile                   string `envconfig:"API_PROFILE"`
+	PortalURL                    string `envconfig:"PORTAL_ENDPOINT"`
 	TimeoutCommands              bool
 }
 
