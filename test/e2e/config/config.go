@@ -129,6 +129,7 @@ func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) erro
 	cs.Properties.CustomCloudProfile.Environment.KeyVaultDNSSuffix = ccc.KeyVaultDNSSuffix
 	cs.Properties.CustomCloudProfile.Environment.ServiceManagementVMDNSSuffix = ccc.ServiceManagementVMDNSSuffix
 	cs.Properties.CustomCloudProfile.Environment.ResourceManagerVMDNSSuffix = ccc.ResourceManagerVMDNSSuffix
+	cs.Properties.CustomCloudProfile.Environment.ManagementPortalURL = ccc.PortalURL
 
 	cs.Properties.ServicePrincipalProfile.ClientID = ccc.CustomCloudClientID
 	if ccc.IdentitySystem == "azure_ad" {
