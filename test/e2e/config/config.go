@@ -116,19 +116,12 @@ func (c *Config) UpdateCustomCloudClusterDefinition(ccc *CustomCloudConfig) erro
 	cs := parseVlabsContainerSerice(clusterDefinitionFullPath)
 
 	cs.Location = c.Location
-	cs.Properties.CustomCloudProfile.Environment.ServiceManagementEndpoint = ccc.ServiceManagementEndpoint
-	cs.Properties.CustomCloudProfile.Environment.ResourceManagerEndpoint = ccc.ResourceManagerEndpoint
-	cs.Properties.CustomCloudProfile.Environment.ActiveDirectoryEndpoint = ccc.ActiveDirectoryEndpoint
 	if ccc.IdentitySystem == "adfs" {
 		trimStr := strings.TrimSuffix(ccc.ActiveDirectoryEndpoint, "/")
 		trimStr = strings.TrimSuffix(trimStr, "adfs")
 		cs.Properties.CustomCloudProfile.Environment.ActiveDirectoryEndpoint = trimStr
 	}
-	cs.Properties.CustomCloudProfile.Environment.GalleryEndpoint = ccc.GalleryEndpoint
-	cs.Properties.CustomCloudProfile.Environment.GraphEndpoint = ccc.GraphEndpoint
-	cs.Properties.CustomCloudProfile.Environment.KeyVaultDNSSuffix = ccc.KeyVaultDNSSuffix
-	cs.Properties.CustomCloudProfile.Environment.ServiceManagementVMDNSSuffix = ccc.ServiceManagementVMDNSSuffix
-	cs.Properties.CustomCloudProfile.Environment.ResourceManagerVMDNSSuffix = ccc.ResourceManagerVMDNSSuffix
+	
 	cs.Properties.CustomCloudProfile.PortalURL = ccc.PortalURL
 
 	cs.Properties.ServicePrincipalProfile.ClientID = ccc.CustomCloudClientID
