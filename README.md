@@ -1,3 +1,11 @@
+# Pardon our Dust!
+
+This codebase has been deprecated in favor of upstream aks-engine. All future development and maintenance will occur there as an outcome of this deprecation. We're sorry for any inconvenience!
+
+Latest release binaries from https://github.com/Azure/aks-engine can be used to perform Kubernetes cluster operations.
+
+The historical documentation remains below.
+
 # AKS Engine - Units of Kubernetes on Azure!
 
 [![Coverage Status](https://codecov.io/gh/Azure/aks-engine/branch/master/graph/badge.svg)](https://codecov.io/gh/Azure/aks-engine)
