@@ -54,7 +54,7 @@ func handleValidationErrors(e validator.ValidationErrors) error {
 			case strings.HasSuffix(ns, ".OSDiskSizeGB"):
 				return errors.Errorf("Invalid os disk size of %d specified.  The range of valid values are [%d, %d]", err.Value().(int), MinDiskSizeGB, MaxDiskSizeGB)
 			case strings.HasSuffix(ns, ".StorageProfile"):
-				return errors.Errorf("Unknown storageProfile '%s'. Specify either %s or %s", err.Value().(string), StorageAccount, ManagedDisks)
+				return errors.Errorf("Unknown storageProfile '%s'. Specify %s, %s, or %s", err.Value().(string), StorageAccount, ManagedDisks, Ephemeral)
 			default:
 				break
 			}
@@ -134,9 +134,9 @@ func validateVNET(a *Properties) error {
 				return err
 			}
 
-			subIDMap[agentSubID] = subIDMap[agentSubID] + 1
-			resourceGroupMap[agentRG] = resourceGroupMap[agentRG] + 1
-			agentVNETMap[agentVNET] = agentVNETMap[agentVNET] + 1
+			subIDMap[agentSubID]++
+			resourceGroupMap[agentRG]++
+			agentVNETMap[agentVNET]++
 		}
 
 		// TODO: Add more validation to ensure all agent pools belong to the same VNET, subscription, and resource group

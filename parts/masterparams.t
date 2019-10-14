@@ -63,6 +63,13 @@
       "type": "string"
     },
   {{end}}
+  "masterSubnetIPv6": {
+      "defaultValue": "{{.MasterProfile.SubnetIPv6}}",
+      "metadata": {
+        "description": "Sets the IPv6 subnet of the master node(s)."
+      },
+      "type": "string"
+    },
   {{if .MasterProfile.HasAvailabilityZones}}
   "availabilityZones": {
     "metadata": {
@@ -179,7 +186,7 @@
       },
       "type": "string"
     }
-{{if .LinuxProfile.HasSecrets}}
+{{if .LinuxProfile}}{{if .LinuxProfile.HasSecrets}}
   {{range  $vIndex, $vault := .LinuxProfile.Secrets}}
     ,
     "linuxKeyVaultID{{$vIndex}}": {
@@ -198,7 +205,7 @@
       }
     {{end}}
   {{end}}
-{{end}}
+{{end}}{{end}}
 {{if .HasWindows}}{{if .WindowsProfile.HasSecrets}}
   {{range  $vIndex, $vault := .WindowsProfile.Secrets}}
     ,

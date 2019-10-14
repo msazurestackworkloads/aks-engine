@@ -4,22 +4,30 @@
 package api
 
 import (
+	"net/url"
 	"testing"
+
+	"github.com/Azure/go-autorest/autorest/to"
+
+	v20160330 "github.com/Azure/aks-engine/pkg/api/v20160330"
+	v20170131 "github.com/Azure/aks-engine/pkg/api/v20170131"
 
 	"github.com/davecgh/go-spew/spew"
 	"k8s.io/apimachinery/pkg/api/equality"
 
 	"github.com/Azure/aks-engine/pkg/api/common"
+	v20160930 "github.com/Azure/aks-engine/pkg/api/v20160930"
 	v20170701 "github.com/Azure/aks-engine/pkg/api/v20170701"
 	"github.com/Azure/aks-engine/pkg/api/vlabs"
 	"github.com/Azure/go-autorest/autorest/azure"
+	"github.com/google/go-cmp/cmp"
 )
 
 func TestAddDCOSPublicAgentPool(t *testing.T) {
 	expectedNumPools := 2
 	for _, masterCount := range [2]int{1, 3} {
 		profiles := []*AgentPoolProfile{}
-		profile := makeAgentPoolProfile(1, "agentprivate", "test-dcos-pool", "Standard_D2_v2", "Linux")
+		profile := makeAgentPoolProfile(1, "agentprivate", "test-dcos-pool", "Standard_D2_v2", Linux)
 		profiles = append(profiles, profile)
 		master := makeMasterProfile(masterCount, "test-dcos", "Standard_D2_v2")
 		props := getProperties(profiles, master)
@@ -71,8 +79,8 @@ func makeAgentPoolProfile(count int, name, dNSPrefix, vMSize string, oSType OSTy
 func makeMasterProfile(count int, dNSPrefix, vMSize string) *MasterProfile {
 	return &MasterProfile{
 		Count:     count,
-		DNSPrefix: "test-dcos",
-		VMSize:    "Standard_D2_v2",
+		DNSPrefix: dNSPrefix,
+		VMSize:    vMSize,
 	}
 }
 
@@ -129,7 +137,7 @@ func TestOrchestratorVersion(t *testing.T) {
 		Properties: &vlabs.Properties{
 			OrchestratorProfile: &vlabs.OrchestratorProfile{
 				OrchestratorType:    vlabs.Kubernetes,
-				OrchestratorVersion: "1.9.11",
+				OrchestratorVersion: "1.10.13",
 			},
 		},
 	}
@@ -137,7 +145,7 @@ func TestOrchestratorVersion(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to convert ContainerService, error: %s", err)
 	}
-	if cs.Properties.OrchestratorProfile.OrchestratorVersion != "1.9.11" {
+	if cs.Properties.OrchestratorProfile.OrchestratorVersion != "1.10.13" {
 		t.Fatalf("incorrect OrchestratorVersion '%s'", cs.Properties.OrchestratorProfile.OrchestratorVersion)
 	}
 }
@@ -174,36 +182,6 @@ func TestKubernetesOrchestratorVersionFailWhenInvalid(t *testing.T) {
 
 }
 
-func TestKubernetesVlabsDefaults(t *testing.T) {
-	vp := makeKubernetesPropertiesVlabs()
-	ap := makeKubernetesProperties()
-	setVlabsKubernetesDefaults(vp, ap.OrchestratorProfile)
-	if ap.OrchestratorProfile.KubernetesConfig == nil {
-		t.Fatalf("KubernetesConfig cannot be nil after vlabs default conversion")
-	}
-	if ap.OrchestratorProfile.KubernetesConfig.NetworkPlugin != vlabs.DefaultNetworkPlugin {
-		t.Fatalf("vlabs defaults not applied, expected NetworkPlugin: %s, instead got: %s", vlabs.DefaultNetworkPlugin, ap.OrchestratorProfile.KubernetesConfig.NetworkPlugin)
-	}
-	if ap.OrchestratorProfile.KubernetesConfig.NetworkPolicy != vlabs.DefaultNetworkPolicy {
-		t.Fatalf("vlabs defaults not applied, expected NetworkPolicy: %s, instead got: %s", vlabs.DefaultNetworkPolicy, ap.OrchestratorProfile.KubernetesConfig.NetworkPolicy)
-	}
-
-	vp = makeKubernetesPropertiesVlabs()
-	vp.WindowsProfile = &vlabs.WindowsProfile{}
-	vp.AgentPoolProfiles = append(vp.AgentPoolProfiles, &vlabs.AgentPoolProfile{OSType: "Windows"})
-	ap = makeKubernetesProperties()
-	setVlabsKubernetesDefaults(vp, ap.OrchestratorProfile)
-	if ap.OrchestratorProfile.KubernetesConfig == nil {
-		t.Fatalf("KubernetesConfig cannot be nil after vlabs default conversion")
-	}
-	if ap.OrchestratorProfile.KubernetesConfig.NetworkPlugin != vlabs.DefaultNetworkPluginWindows {
-		t.Fatalf("vlabs defaults not applied, expected NetworkPlugin: %s, instead got: %s", vlabs.DefaultNetworkPluginWindows, ap.OrchestratorProfile.KubernetesConfig.NetworkPlugin)
-	}
-	if ap.OrchestratorProfile.KubernetesConfig.NetworkPolicy != vlabs.DefaultNetworkPolicy {
-		t.Fatalf("vlabs defaults not applied, expected NetworkPolicy: %s, instead got: %s", vlabs.DefaultNetworkPolicy, ap.OrchestratorProfile.KubernetesConfig.NetworkPolicy)
-	}
-}
-
 func TestConvertVLabsKubernetesConfigProfile(t *testing.T) {
 	tests := map[string]struct {
 		props  *vlabs.KubernetesConfig
@@ -227,20 +205,6 @@ func TestConvertVLabsKubernetesConfigProfile(t *testing.T) {
 			t.Errorf(spew.Sprintf("Expected:\n%+v\nGot:\n%+v", test.expect, actual))
 		}
 	}
-}
-
-func makeKubernetesProperties() *Properties {
-	ap := &Properties{}
-	ap.OrchestratorProfile = &OrchestratorProfile{}
-	ap.OrchestratorProfile.OrchestratorType = "Kubernetes"
-	return ap
-}
-
-func makeKubernetesPropertiesVlabs() *vlabs.Properties {
-	vp := &vlabs.Properties{}
-	vp.OrchestratorProfile = &vlabs.OrchestratorProfile{}
-	vp.OrchestratorProfile.OrchestratorType = "Kubernetes"
-	return vp
 }
 
 func TestConvertCustomFilesToAPI(t *testing.T) {
@@ -292,6 +256,8 @@ func TestCustomCloudProfile(t *testing.T) {
 	vlabscs := &vlabs.ContainerService{
 		Properties: &vlabs.Properties{
 			CustomCloudProfile: &vlabs.CustomCloudProfile{
+				IdentitySystem:       ADFSIdentitySystem,
+				AuthenticationMethod: ClientCertificateAuthMethod,
 				Environment: &azure.Environment{
 					Name:                         name,
 					ManagementPortalURL:          managementPortalURL,
@@ -320,7 +286,13 @@ func TestCustomCloudProfile(t *testing.T) {
 
 	cs, err := ConvertVLabsContainerService(vlabscs, false)
 	if err != nil {
-		t.Fatalf("failed to convert: '%s'", err)
+		t.Fatalf("Failed to convert ContainerService, error: %s", err)
+	}
+	if cs.Properties.CustomCloudProfile.AuthenticationMethod != ClientCertificateAuthMethod {
+		t.Errorf("incorrect AuthenticationMethod, expect: '%s', actual: '%s'", ClientCertificateAuthMethod, cs.Properties.CustomCloudProfile.AuthenticationMethod)
+	}
+	if cs.Properties.CustomCloudProfile.IdentitySystem != ADFSIdentitySystem {
+		t.Errorf("incorrect IdentitySystem, expect: '%s', actual: '%s'", ADFSIdentitySystem, cs.Properties.CustomCloudProfile.IdentitySystem)
 	}
 	if cs.Properties.CustomCloudProfile.Environment.Name != name {
 		t.Errorf("incorrect Name, expect: '%s', actual: '%s'", name, cs.Properties.CustomCloudProfile.Environment.Name)
@@ -389,6 +361,8 @@ func TestConvertAzureEnvironmentSpecConfig(t *testing.T) {
 	vlabscs := &vlabs.ContainerService{
 		Properties: &vlabs.Properties{
 			CustomCloudProfile: &vlabs.CustomCloudProfile{
+				IdentitySystem:       AzureADIdentitySystem,
+				AuthenticationMethod: ClientSecretAuthMethod,
 				AzureEnvironmentSpecConfig: &vlabs.AzureEnvironmentSpecConfig{
 					CloudName: "AzureStackCloud",
 					//DockerSpecConfig specify the docker engine download repo
@@ -398,11 +372,14 @@ func TestConvertAzureEnvironmentSpecConfig(t *testing.T) {
 					},
 					//KubernetesSpecConfig - Due to Chinese firewall issue, the default containers from google is blocked, use the Chinese local mirror instead
 					KubernetesSpecConfig: vlabs.KubernetesSpecConfig{
+						AzureTelemetryPID:                "AzureTelemetryPID",
 						KubernetesImageBase:              "KubernetesImageBase",
+						MCRKubernetesImageBase:           "MCRKubernetesImageBase",
 						TillerImageBase:                  "TillerImageBase",
 						ACIConnectorImageBase:            "ACIConnectorImageBase",
 						NVIDIAImageBase:                  "NVIDIAImageBase",
 						AzureCNIImageBase:                "AzureCNIImageBase",
+						CalicoImageBase:                  "CalicoImageBase",
 						EtcdDownloadURLBase:              "EtcdDownloadURLBase",
 						KubeBinariesSASURLBase:           "KubeBinariesSASURLBase",
 						WindowsTelemetryGUID:             "WindowsTelemetryGUID",
@@ -437,9 +414,17 @@ func TestConvertAzureEnvironmentSpecConfig(t *testing.T) {
 			},
 		},
 	}
+
 	cs, err := ConvertVLabsContainerService(vlabscs, false)
 	if err != nil {
 		t.Fatalf("Failed to convert ContainerService, error: %s", err)
+	}
+
+	if cs.Properties.CustomCloudProfile.AuthenticationMethod != ClientSecretAuthMethod {
+		t.Errorf("incorrect AuthenticationMethod, expect: '%s', actual: '%s'", ClientSecretAuthMethod, cs.Properties.CustomCloudProfile.AuthenticationMethod)
+	}
+	if cs.Properties.CustomCloudProfile.IdentitySystem != AzureADIdentitySystem {
+		t.Errorf("incorrect IdentitySystem, expect: '%s', actual: '%s'", AzureADIdentitySystem, cs.Properties.CustomCloudProfile.IdentitySystem)
 	}
 
 	csSpec := cs.Properties.CustomCloudProfile.AzureEnvironmentSpecConfig
@@ -449,6 +434,9 @@ func TestConvertAzureEnvironmentSpecConfig(t *testing.T) {
 	}
 
 	//KubernetesSpecConfig
+	if csSpec.KubernetesSpecConfig.AzureTelemetryPID != vlabscsSpec.KubernetesSpecConfig.AzureTelemetryPID {
+		t.Errorf("incorrect AzureTelemetryPID, expect: '%s', actual: '%s'", vlabscsSpec.KubernetesSpecConfig.AzureTelemetryPID, csSpec.KubernetesSpecConfig.AzureTelemetryPID)
+	}
 	if csSpec.KubernetesSpecConfig.KubernetesImageBase != vlabscsSpec.KubernetesSpecConfig.KubernetesImageBase {
 		t.Errorf("incorrect KubernetesImageBase, expect: '%s', actual: '%s'", vlabscsSpec.KubernetesSpecConfig.KubernetesImageBase, csSpec.KubernetesSpecConfig.KubernetesImageBase)
 	}
@@ -546,5 +534,820 @@ func TestConvertAzureEnvironmentSpecConfig(t *testing.T) {
 		} else {
 			t.Errorf("incorrect OSImageConfig: '%s' is missing", string(k))
 		}
+	}
+}
+
+func TestConvertV20160930ContainerService(t *testing.T) {
+	storageURL, _ := url.Parse("https://bing.com")
+	v20160930CS := &v20160930.ContainerService{
+		Location: "westus2",
+		Plan: &v20160930.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &v20160930.Properties{
+			ProvisioningState: v20160930.Succeeded,
+			OrchestratorProfile: &v20160930.OrchestratorProfile{
+				OrchestratorType: DCOS,
+			},
+			WindowsProfile: &v20160930.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			DiagnosticsProfile: &v20160930.DiagnosticsProfile{
+				VMDiagnostics: &v20160930.VMDiagnostics{
+					Enabled:    true,
+					StorageURL: storageURL,
+				},
+			},
+			JumpboxProfile: &v20160930.JumpboxProfile{
+				OSType:    "Linux",
+				DNSPrefix: "blueorange",
+				FQDN:      "blueorange.westus2.azureapp.com",
+			},
+			AgentPoolProfiles: []*v20160930.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+			},
+			MasterProfile: &v20160930.MasterProfile{
+				Count: 1,
+			},
+			CustomProfile: &v20160930.CustomProfile{
+				Orchestrator: DCOS,
+			},
+		},
+	}
+
+	apiCs := ConvertV20160930ContainerService(v20160930CS)
+
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertV20160930ContainerService")
+	}
+}
+
+func TestConvertV20170701ContainerService(t *testing.T) {
+	v20170701CS := &v20170701.ContainerService{
+		Location: "westus2",
+		Plan: &v20170701.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &v20170701.Properties{
+			ProvisioningState: v20170701.Succeeded,
+			OrchestratorProfile: &v20170701.OrchestratorProfile{
+				OrchestratorType: DCOS,
+			},
+			WindowsProfile: &v20170701.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			AgentPoolProfiles: []*v20170701.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+			},
+			MasterProfile: &v20170701.MasterProfile{
+				Count: 1,
+			},
+			CustomProfile: &v20170701.CustomProfile{
+				Orchestrator: DCOS,
+			},
+		},
+	}
+
+	apiCs := ConvertV20170701ContainerService(v20170701CS, false)
+
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertV20170701ContainerService")
+	}
+}
+
+func TestConvertV20160330ContainerService(t *testing.T) {
+	storageURL, _ := url.Parse("https://bing.com")
+	v20160330CS := &v20160330.ContainerService{
+		Location: "westus2",
+		Plan: &v20160330.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &v20160330.Properties{
+			ProvisioningState: v20160330.Succeeded,
+			OrchestratorProfile: &v20160330.OrchestratorProfile{
+				OrchestratorType: DCOS,
+			},
+			WindowsProfile: &v20160330.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			DiagnosticsProfile: &v20160330.DiagnosticsProfile{
+				VMDiagnostics: &v20160330.VMDiagnostics{
+					Enabled:    true,
+					StorageURL: storageURL,
+				},
+			},
+			JumpboxProfile: &v20160330.JumpboxProfile{
+				OSType:    "Linux",
+				DNSPrefix: "blueorange",
+				FQDN:      "blueorange.westus2.azureapp.com",
+			},
+			AgentPoolProfiles: []*v20160330.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+			},
+			MasterProfile: &v20160330.MasterProfile{
+				Count: 1,
+			},
+		},
+	}
+
+	apiCs := ConvertV20160330ContainerService(v20160330CS)
+
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertV20160330ContainerService")
+	}
+}
+
+func TestConvertV20170131ContainerService(t *testing.T) {
+	storageURL, _ := url.Parse("https://bing.com")
+	v20170131CS := &v20170131.ContainerService{
+		Location: "westus2",
+		Plan: &v20170131.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &v20170131.Properties{
+			ProvisioningState: v20170131.Succeeded,
+			OrchestratorProfile: &v20170131.OrchestratorProfile{
+				OrchestratorType: DCOS,
+			},
+			WindowsProfile: &v20170131.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			DiagnosticsProfile: &v20170131.DiagnosticsProfile{
+				VMDiagnostics: &v20170131.VMDiagnostics{
+					Enabled:    true,
+					StorageURL: storageURL,
+				},
+			},
+			JumpboxProfile: &v20170131.JumpboxProfile{
+				OSType:    "Linux",
+				DNSPrefix: "blueorange",
+				FQDN:      "blueorange.westus2.azureapp.com",
+			},
+			AgentPoolProfiles: []*v20170131.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+			},
+			MasterProfile: &v20170131.MasterProfile{
+				Count: 1,
+			},
+			CustomProfile: &v20170131.CustomProfile{
+				Orchestrator: DCOS,
+			},
+		},
+	}
+
+	apiCs := ConvertV20170131ContainerService(v20170131CS)
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertV20170131ContainerService")
+	}
+}
+
+func TestConvertVLabsContainerService(t *testing.T) {
+	vlabsCS := &vlabs.ContainerService{
+		Location: "westus2",
+		Plan: &vlabs.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &vlabs.Properties{
+			ProvisioningState: vlabs.Succeeded,
+			OrchestratorProfile: &vlabs.OrchestratorProfile{
+				OrchestratorType: DCOS,
+				DcosConfig: &vlabs.DcosConfig{
+					DcosBootstrapURL:         "SampleDcosBootstrapURL",
+					DcosWindowsBootstrapURL:  "SampleWindowsDcosBootstrapURL",
+					Registry:                 "SampleRegistry",
+					RegistryPass:             "SampleRegistryPass",
+					RegistryUser:             "SampleRegistryUser",
+					DcosClusterPackageListID: "SampleDcosClusterPackageListID",
+					DcosProviderPackageID:    "SampleDcosProviderPackageID",
+					BootstrapProfile: &vlabs.BootstrapProfile{
+						VMSize:       "Standard_Ds1_v1",
+						OSDiskSizeGB: 256,
+						OAuthEnabled: true,
+						StaticIP:     "172.0.0.1",
+						Subnet:       "255.255.255.0",
+					},
+				},
+			},
+			WindowsProfile: &vlabs.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			AgentPoolProfiles: []*vlabs.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+				{
+					Name:      "sampleAgent-public",
+					Count:     2,
+					VMSize:    "sampleVM",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.com",
+					OSType:    "Linux",
+					ImageRef: &vlabs.ImageReference{
+						Name:           "testImage",
+						ResourceGroup:  "testRg",
+						SubscriptionID: "testSub",
+						Gallery:        "testGallery",
+						Version:        "0.0.1",
+					},
+				},
+			},
+			MasterProfile: &vlabs.MasterProfile{
+				Count: 1,
+				PreProvisionExtension: &vlabs.Extension{
+					Name:        "fooExtension",
+					SingleOrAll: "All",
+					Template:    "{{foobar}}",
+				},
+				ImageRef: &vlabs.ImageReference{
+					Name:          "FooImageRef",
+					ResourceGroup: "FooImageRefResourceGroup",
+				},
+				Extensions: []vlabs.Extension{
+					{
+						Name:        "sampleExtension",
+						SingleOrAll: "single",
+						Template:    "{{foobar}}",
+					},
+				},
+			},
+			CertificateProfile: &vlabs.CertificateProfile{
+				CaCertificate:         "SampleCACert",
+				CaPrivateKey:          "SampleCAPrivateKey",
+				APIServerCertificate:  "SampleAPIServerCert",
+				APIServerPrivateKey:   "SampleAPIServerPrivateKey",
+				ClientCertificate:     "SampleClientCert",
+				ClientPrivateKey:      "SampleClientPrivateKey",
+				KubeConfigCertificate: "SampleKubeConfigCert",
+				KubeConfigPrivateKey:  "SampleKubeConfigPrivateKey",
+				EtcdClientCertificate: "SampleEtcdClientCert",
+				EtcdClientPrivateKey:  "SampleEtcdClientPrivateKey",
+				EtcdServerCertificate: "SampleEtcdServerCert",
+				EtcdServerPrivateKey:  "SampleEtcdServerPrivateKey",
+			},
+			FeatureFlags: &vlabs.FeatureFlags{
+				EnableCSERunInBackground: true,
+				BlockOutboundInternet:    false,
+				EnableTelemetry:          false,
+			},
+			AADProfile: &vlabs.AADProfile{
+				ClientAppID:  "SampleClientAppID",
+				ServerAppID:  "ServerAppID",
+				TenantID:     "SampleTenantID",
+				AdminGroupID: "SampleAdminGroupID",
+			},
+			ExtensionProfiles: []*vlabs.ExtensionProfile{
+				{
+					Name:                "fooExtension",
+					Version:             "fooVersion",
+					ExtensionParameters: "fooExtensionParameters",
+					ExtensionParametersKeyVaultRef: &vlabs.KeyvaultSecretRef{
+						VaultID:       "fooVaultID",
+						SecretName:    "fooSecretName",
+						SecretVersion: "fooSecretVersion",
+					},
+					RootURL:  "fooRootURL",
+					Script:   "fooSsript",
+					URLQuery: "fooURL",
+				},
+			},
+			LinuxProfile: &vlabs.LinuxProfile{
+				AdminUsername: "azureuser",
+				Secrets: []vlabs.KeyVaultSecrets{
+					{
+						SourceVault: &vlabs.KeyVaultID{
+							ID: "sampleKeyVaultID",
+						},
+						VaultCertificates: []vlabs.KeyVaultCertificate{
+							{
+								CertificateURL:   "FooCertURL",
+								CertificateStore: "BarCertStore",
+							},
+						},
+					},
+				},
+				CustomNodesDNS: &vlabs.CustomNodesDNS{
+					DNSServer: "SampleDNSServer",
+				},
+				CustomSearchDomain: &vlabs.CustomSearchDomain{
+					Name:          "FooCustomSearchDomain",
+					RealmUser:     "sampleRealmUser",
+					RealmPassword: "sampleRealmPassword",
+				},
+			},
+		},
+	}
+
+	apiCs, err := ConvertVLabsContainerService(vlabsCS, false)
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertVLabsContainerService")
+	}
+
+	if err != nil {
+		t.Errorf("unexpected error while executing ConvertVLabsContainerService: %s", err.Error())
+	}
+
+	//Test Vlabs with Kubernetes Orchestrator
+	vlabsCS.Properties.OrchestratorProfile.OrchestratorType = Kubernetes
+	vlabsCS.Properties.OrchestratorProfile.DcosConfig = nil
+	vlabsCS.Properties.OrchestratorProfile.KubernetesConfig = &vlabs.KubernetesConfig{
+		Addons: []vlabs.KubernetesAddon{
+			{
+				Name:    "sampleAddon",
+				Enabled: to.BoolPtr(true),
+				Containers: []vlabs.KubernetesContainerSpec{
+					{
+						Name:           "sampleK8sContainer",
+						Image:          "sampleK8sImage",
+						MemoryRequests: "20Mi",
+						CPURequests:    "10m",
+					},
+				},
+				Config: map[string]string{
+					"sampleKey": "sampleVal",
+				},
+			},
+		},
+		APIServerConfig: map[string]string{
+			"sampleAPIServerKey": "sampleAPIServerVal",
+		},
+		ControllerManagerConfig: map[string]string{
+			"sampleCMKey": "sampleCMVal",
+		},
+		CloudControllerManagerConfig: map[string]string{
+			"sampleCCMKey": "sampleCCMVal",
+		},
+		SchedulerConfig: map[string]string{
+			"sampleSchedulerKey": "sampleSchedulerVal",
+		},
+		PrivateCluster: &vlabs.PrivateCluster{
+			Enabled: to.BoolPtr(true),
+			JumpboxProfile: &vlabs.PrivateJumpboxProfile{
+				Name:           "sampleJumpboxProfile",
+				VMSize:         "Standard_DS1_v2",
+				OSDiskSizeGB:   512,
+				Username:       "userName",
+				PublicKey:      ValidSSHPublicKey,
+				StorageProfile: StorageAccount,
+			},
+		},
+		PodSecurityPolicyConfig: map[string]string{
+			"samplePSPConfigKey": "samplePSPConfigVal",
+		},
+	}
+
+	apiCs, err = ConvertVLabsContainerService(vlabsCS, false)
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertVLabsContainerService")
+	}
+
+	if err != nil {
+		t.Errorf("unexpected error while executing ConvertVLabsContainerService: %s", err.Error())
+	}
+
+}
+
+func TestTelemetryEnabled(t *testing.T) {
+	vlabsCS := &vlabs.ContainerService{
+		Location: "westus2",
+		Plan: &vlabs.ResourcePurchasePlan{
+			Name:          "fooPlan",
+			PromotionCode: "fooPromoCode",
+			Product:       "fooProduct",
+			Publisher:     "fooPublisher",
+		},
+
+		Tags: map[string]string{
+			"foo": "bar",
+		},
+		Properties: &vlabs.Properties{
+			ProvisioningState: vlabs.Succeeded,
+			OrchestratorProfile: &vlabs.OrchestratorProfile{
+				OrchestratorType: DCOS,
+				DcosConfig: &vlabs.DcosConfig{
+					DcosBootstrapURL:         "SampleDcosBootstrapURL",
+					DcosWindowsBootstrapURL:  "SampleWindowsDcosBootstrapURL",
+					Registry:                 "SampleRegistry",
+					RegistryPass:             "SampleRegistryPass",
+					RegistryUser:             "SampleRegistryUser",
+					DcosClusterPackageListID: "SampleDcosClusterPackageListID",
+					DcosProviderPackageID:    "SampleDcosProviderPackageID",
+					BootstrapProfile: &vlabs.BootstrapProfile{
+						VMSize:       "Standard_Ds1_v1",
+						OSDiskSizeGB: 256,
+						OAuthEnabled: true,
+						StaticIP:     "172.0.0.1",
+						Subnet:       "255.255.255.0",
+					},
+				},
+			},
+			WindowsProfile: &vlabs.WindowsProfile{
+				AdminUsername: "sampleAdminUsername",
+				AdminPassword: "sampleAdminPassword",
+			},
+			AgentPoolProfiles: []*vlabs.AgentPoolProfile{
+				{
+					Name:      "sampleagent",
+					Count:     2,
+					VMSize:    "Standard_DS1_v1",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.azureapp.com",
+					OSType:    "Linux",
+				},
+				{
+					Name:      "sampleAgent-public",
+					Count:     2,
+					VMSize:    "sampleVM",
+					DNSPrefix: "blueorange",
+					FQDN:      "blueorange.westus2.com",
+					OSType:    "Linux",
+					ImageRef: &vlabs.ImageReference{
+						Name:           "testImage",
+						ResourceGroup:  "testRg",
+						SubscriptionID: "testSub",
+						Gallery:        "testGallery",
+						Version:        "0.0.1",
+					},
+				},
+			},
+			MasterProfile: &vlabs.MasterProfile{
+				Count: 1,
+				PreProvisionExtension: &vlabs.Extension{
+					Name:        "fooExtension",
+					SingleOrAll: "All",
+					Template:    "{{foobar}}",
+				},
+				ImageRef: &vlabs.ImageReference{
+					Name:          "FooImageRef",
+					ResourceGroup: "FooImageRefResourceGroup",
+				},
+				Extensions: []vlabs.Extension{
+					{
+						Name:        "sampleExtension",
+						SingleOrAll: "single",
+						Template:    "{{foobar}}",
+					},
+				},
+			},
+			CertificateProfile: &vlabs.CertificateProfile{
+				CaCertificate:         "SampleCACert",
+				CaPrivateKey:          "SampleCAPrivateKey",
+				APIServerCertificate:  "SampleAPIServerCert",
+				APIServerPrivateKey:   "SampleAPIServerPrivateKey",
+				ClientCertificate:     "SampleClientCert",
+				ClientPrivateKey:      "SampleClientPrivateKey",
+				KubeConfigCertificate: "SampleKubeConfigCert",
+				KubeConfigPrivateKey:  "SampleKubeConfigPrivateKey",
+				EtcdClientCertificate: "SampleEtcdClientCert",
+				EtcdClientPrivateKey:  "SampleEtcdClientPrivateKey",
+				EtcdServerCertificate: "SampleEtcdServerCert",
+				EtcdServerPrivateKey:  "SampleEtcdServerPrivateKey",
+			},
+			FeatureFlags: &vlabs.FeatureFlags{
+				EnableCSERunInBackground: true,
+				BlockOutboundInternet:    false,
+				EnableTelemetry:          true,
+			},
+			AADProfile: &vlabs.AADProfile{
+				ClientAppID:  "SampleClientAppID",
+				ServerAppID:  "ServerAppID",
+				TenantID:     "SampleTenantID",
+				AdminGroupID: "SampleAdminGroupID",
+			},
+			ExtensionProfiles: []*vlabs.ExtensionProfile{
+				{
+					Name:                "fooExtension",
+					Version:             "fooVersion",
+					ExtensionParameters: "fooExtensionParameters",
+					ExtensionParametersKeyVaultRef: &vlabs.KeyvaultSecretRef{
+						VaultID:       "fooVaultID",
+						SecretName:    "fooSecretName",
+						SecretVersion: "fooSecretVersion",
+					},
+					RootURL:  "fooRootURL",
+					Script:   "fooSsript",
+					URLQuery: "fooURL",
+				},
+			},
+			LinuxProfile: &vlabs.LinuxProfile{
+				AdminUsername: "azureuser",
+				Secrets: []vlabs.KeyVaultSecrets{
+					{
+						SourceVault: &vlabs.KeyVaultID{
+							ID: "sampleKeyVaultID",
+						},
+						VaultCertificates: []vlabs.KeyVaultCertificate{
+							{
+								CertificateURL:   "FooCertURL",
+								CertificateStore: "BarCertStore",
+							},
+						},
+					},
+				},
+				CustomNodesDNS: &vlabs.CustomNodesDNS{
+					DNSServer: "SampleDNSServer",
+				},
+				CustomSearchDomain: &vlabs.CustomSearchDomain{
+					Name:          "FooCustomSearchDomain",
+					RealmUser:     "sampleRealmUser",
+					RealmPassword: "sampleRealmPassword",
+				},
+			},
+		},
+	}
+
+	apiCs, err := ConvertVLabsContainerService(vlabsCS, false)
+	if apiCs == nil {
+		t.Error("unexpected nil output while executing ConvertVLabsContainerService")
+	}
+
+	if err != nil {
+		t.Errorf("unexpected error while executing ConvertVLabsContainerService: %s", err.Error())
+	}
+
+	if !vlabsCS.Properties.FeatureFlags.EnableTelemetry {
+		t.Error("unexpected false output while checking for EnableTelemetry")
+	}
+}
+func TestConvertVLabsWindowsProfile(t *testing.T) {
+	falseVar := false
+
+	cases := []struct {
+		name     string
+		w        vlabs.WindowsProfile
+		expected WindowsProfile
+	}{
+		{
+			name: "empty profile",
+			w:    vlabs.WindowsProfile{},
+			expected: WindowsProfile{
+				Secrets: []KeyVaultSecrets{},
+			},
+		},
+		{
+			name: "misc fields",
+			w: vlabs.WindowsProfile{
+				AdminUsername:          "user",
+				AdminPassword:          "password",
+				EnableAutomaticUpdates: &falseVar,
+				ImageVersion:           "17763.615.1907121548",
+				SSHEnabled:             false,
+				WindowsPublisher:       "MicrosoftWindowsServer",
+				WindowsOffer:           "WindowsServer",
+				WindowsSku:             "2019-Datacenter-Core-smalldisk",
+				WindowsDockerVersion:   "18.09",
+			},
+			expected: WindowsProfile{
+				AdminUsername:          "user",
+				AdminPassword:          "password",
+				EnableAutomaticUpdates: &falseVar,
+				ImageVersion:           "17763.615.1907121548",
+				SSHEnabled:             false,
+				WindowsPublisher:       "MicrosoftWindowsServer",
+				WindowsOffer:           "WindowsServer",
+				WindowsSku:             "2019-Datacenter-Core-smalldisk",
+				WindowsDockerVersion:   "18.09",
+				Secrets:                []KeyVaultSecrets{},
+			},
+		},
+		{
+			name: "image reference",
+			w: vlabs.WindowsProfile{
+				ImageRef: &vlabs.ImageReference{
+					Gallery:        "gallery",
+					Name:           "name",
+					ResourceGroup:  "rg",
+					SubscriptionID: "dc6bd10c-110c-4134-88c5-4d5a039129c4",
+					Version:        "1.25.6",
+				},
+			},
+			expected: WindowsProfile{
+				ImageRef: &ImageReference{
+					Gallery:        "gallery",
+					Name:           "name",
+					ResourceGroup:  "rg",
+					SubscriptionID: "dc6bd10c-110c-4134-88c5-4d5a039129c4",
+					Version:        "1.25.6",
+				},
+				Secrets: []KeyVaultSecrets{},
+			},
+		},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			actual := WindowsProfile{}
+			convertVLabsWindowsProfile(&c.w, &actual)
+
+			diff := cmp.Diff(actual, c.expected)
+			if diff != "" {
+				t.Errorf("unexpected diff testing convertVLabsWindowsProfile: %s", diff)
+			}
+		})
+	}
+}
+
+func TestSetVlabsKubernetesDefaults(t *testing.T) {
+	tests := []struct {
+		name                  string
+		p                     *vlabs.Properties
+		expectedNetworkPlugin string
+		expectedNetworkPolicy string
+	}{
+		{
+			name: "default",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "",
+					},
+				},
+			},
+			expectedNetworkPlugin: vlabs.DefaultNetworkPlugin,
+			expectedNetworkPolicy: "",
+		},
+		{
+			name: "default windows",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "",
+					},
+				},
+				AgentPoolProfiles: []*vlabs.AgentPoolProfile{
+					{
+						OSType: "Windows",
+					},
+				},
+			},
+			expectedNetworkPlugin: vlabs.DefaultNetworkPluginWindows,
+			expectedNetworkPolicy: "",
+		},
+		{
+			name: "azure networkPlugin",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "azure",
+						NetworkPolicy: "",
+					},
+				},
+			},
+			expectedNetworkPlugin: vlabs.DefaultNetworkPlugin,
+			expectedNetworkPolicy: "",
+		},
+		{
+			name: "azure networkPolicy back-compat",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "azure",
+					},
+				},
+			},
+			expectedNetworkPlugin: "azure",
+			expectedNetworkPolicy: "",
+		},
+		{
+			name: "none networkPolicy back-compat",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "none",
+					},
+				},
+			},
+			expectedNetworkPlugin: "kubenet",
+			expectedNetworkPolicy: "",
+		},
+		{
+			name: "test literal string conversion",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "foo",
+						NetworkPolicy: "bar",
+					},
+				},
+			},
+			expectedNetworkPlugin: "foo",
+			expectedNetworkPolicy: "bar",
+		},
+		{
+			name: "calico networkPlicy",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "calico",
+					},
+				},
+			},
+			expectedNetworkPlugin: "azure",
+			expectedNetworkPolicy: "calico",
+		},
+		{
+			name: "cilium networkPlicy",
+			p: &vlabs.Properties{
+				OrchestratorProfile: &vlabs.OrchestratorProfile{
+					KubernetesConfig: &vlabs.KubernetesConfig{
+						NetworkPlugin: "",
+						NetworkPolicy: "cilium",
+					},
+				},
+			},
+			expectedNetworkPlugin: "",
+			expectedNetworkPolicy: "cilium",
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			converted := &OrchestratorProfile{}
+			setVlabsKubernetesDefaults(test.p, converted)
+			if converted.KubernetesConfig.NetworkPlugin != test.expectedNetworkPlugin {
+				t.Errorf("expected NetworkPlugin : %s, but got %s", test.expectedNetworkPlugin, converted.KubernetesConfig.NetworkPlugin)
+			}
+		})
 	}
 }

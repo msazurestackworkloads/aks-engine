@@ -20,6 +20,11 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
+const (
+	sshRetries = 20
+	scriptsDir = "scripts"
+)
+
 // Connection is
 type Connection struct {
 	Host           string
@@ -28,6 +33,24 @@ type Connection struct {
 	PrivateKeyPath string
 	ClientConfig   *ssh.ClientConfig
 	Client         *ssh.Client
+}
+
+// NewConnectionResult is the result type for GetConfigAsync
+type NewConnectionResult struct {
+	Connection *Connection
+	Err        error
+}
+
+// NewConnectionAsync wraps NewConnection with a struct response for goroutine + channel usage
+func NewConnectionAsync(host, port, user, keyPath string) NewConnectionResult {
+	connection, err := NewConnection(host, port, user, keyPath)
+	if connection == nil {
+		connection = &Connection{}
+	}
+	return NewConnectionResult{
+		Connection: connection,
+		Err:        err,
+	}
 }
 
 // NewConnection will build and return a new Connection object
@@ -83,15 +106,55 @@ func NewConnection(host, port, user, keyPath string) (*Connection, error) {
 	}, nil
 }
 
+// NewConnectionWithRetry establishes an ssh connection, allowing for retries
+func NewConnectionWithRetry(host, port, user, keyPath string, sleep, timeout time.Duration) (*Connection, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan NewConnectionResult)
+	var mostRecentNewConnectionWithRetryError error
+	var connection *Connection
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- NewConnectionAsync(host, port, user, keyPath):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case result := <-ch:
+			mostRecentNewConnectionWithRetryError = result.Err
+			connection = result.Connection
+			if mostRecentNewConnectionWithRetryError == nil {
+				return connection, nil
+			}
+		case <-ctx.Done():
+			return nil, errors.Errorf("NewConnectionWithRetry timed out: %s\n", mostRecentNewConnectionWithRetryError)
+		}
+	}
+}
+
 // Execute will execute a given cmd on a remote host
-func (c *Connection) Execute(cmd string) ([]byte, error) {
+func (c *Connection) Execute(cmd string, printStdout bool) error {
 	session, err := c.Client.NewSession()
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer session.Close()
 
-	return session.CombinedOutput(cmd)
+	fmt.Printf("\n$ %s\n", cmd)
+	out, err := session.CombinedOutput(cmd)
+	if err != nil {
+		log.Printf("Error output:%s\n", out)
+		return err
+	}
+	if printStdout {
+		log.Printf("%s\n", out)
+	}
+	return nil
 }
 
 func (c *Connection) Write(data, path string) error {
@@ -120,19 +183,32 @@ func (c *Connection) Read(path string) ([]byte, error) {
 	return out, nil
 }
 
-// CopyRemote uses this ssh connection to scp remote files
-func (c *Connection) CopyRemote(hostname, path string) error {
-	cmd := exec.Command("ssh-add", c.PrivateKeyPath)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error output:%s\n", out)
-		return err
+// CopyTo uses this ssh connection to send files to the remote ssh listener's underlying file system
+func (c *Connection) CopyTo(filename string) error {
+	var scpError error
+	var scpOut []byte
+	for i := 0; i < sshRetries; i++ {
+		connectString := fmt.Sprintf("%s@%s", c.User, c.Host)
+		cmd := exec.Command("scp", "-i", c.PrivateKeyPath, "-P", c.Port, "-o", "StrictHostKeyChecking=no", filepath.Join(scriptsDir, filename), connectString+":/tmp/"+filename)
+		util.PrintCommand(cmd)
+		scpOut, scpError = cmd.CombinedOutput()
+		if scpError != nil {
+			log.Printf("Error output:%s\n", scpOut)
+			continue
+		} else {
+			break
+		}
 	}
+	return scpError
+}
+
+// CopyFrom uses this ssh connection to get remote files via scp
+func (c *Connection) CopyFrom(hostname, path string) error {
 	remoteCommand := fmt.Sprintf("scp -o StrictHostKeyChecking=no %s:%s /tmp/%s-%s", hostname, path, hostname, filepath.Base(path))
 	connectString := fmt.Sprintf("%s@%s", c.User, c.Host)
-	cmd = exec.Command("ssh", "-A", "-i", c.PrivateKeyPath, "-o", "ConnectTimeout=30", "-o", "StrictHostKeyChecking=no", connectString, "-p", c.Port, remoteCommand)
+	cmd := exec.Command("ssh", "-A", "-i", c.PrivateKeyPath, "-o", "ConnectTimeout=30", "-o", "StrictHostKeyChecking=no", connectString, "-p", c.Port, remoteCommand)
 	util.PrintCommand(cmd)
-	out, err = cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Printf("Error output:%s\n", out)
 		return err
@@ -140,32 +216,72 @@ func (c *Connection) CopyRemote(hostname, path string) error {
 	return nil
 }
 
-// ExecuteWithRetries will keep retrying a command until it does not return an error or the duration is exceeded
-func (c *Connection) ExecuteWithRetries(cmd string, sleep, duration time.Duration) ([]byte, error) {
-	outCh := make(chan []byte, 1)
-	errCh := make(chan error)
-	ctx, cancel := context.WithTimeout(context.Background(), duration)
+// CopyToRemote uses this ssh connection to send files via scp to a remote host
+func (c *Connection) CopyToRemote(hostname, path string) error {
+	var sshError error
+	var sshOut []byte
+	for i := 0; i < sshRetries; i++ {
+		remoteCommand := fmt.Sprintf("scp -o StrictHostKeyChecking=no %s %s:%s", path, hostname, path)
+		connectString := fmt.Sprintf("%s@%s", c.User, c.Host)
+		cmd := exec.Command("ssh", "-A", "-i", c.PrivateKeyPath, "-o", "ConnectTimeout=30", "-o", "StrictHostKeyChecking=no", connectString, "-p", c.Port, remoteCommand)
+		util.PrintCommand(cmd)
+		sshOut, sshError = cmd.CombinedOutput()
+		if sshError != nil {
+			log.Printf("Error output:%s\n", sshOut)
+			continue
+		} else {
+			break
+		}
+	}
+	return sshError
+}
+
+// ExecuteRemote uses this ssh connection to run a remote command from the primary master node
+func (c *Connection) ExecuteRemote(node, command string, printStdout bool) error {
+	var sshError error
+	var sshOut []byte
+	for i := 0; i < sshRetries; i++ {
+		cmd := exec.Command("ssh", "-A", "-i", c.PrivateKeyPath, "-p", c.Port, "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", fmt.Sprintf("%s@%s", c.User, c.Host), "ssh", "-o", "ConnectTimeout=10", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "LogLevel=ERROR", node, command)
+		util.PrintCommand(cmd)
+		sshOut, sshError = cmd.CombinedOutput()
+		if sshError != nil {
+			log.Printf("Error output:%s\n", sshOut)
+			continue
+		} else {
+			if printStdout {
+				log.Printf("%s\n", sshOut)
+			}
+			break
+		}
+	}
+	return sshError
+}
+
+// ExecuteRemoteWithRetry runs a remote command with retry tolerance
+func (c *Connection) ExecuteRemoteWithRetry(node, command string, printStdout bool, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
+	ch := make(chan error)
+	var mostRecentExecuteRemoteWithRetryError error
 	go func() {
 		for {
 			select {
 			case <-ctx.Done():
-				errCh <- errors.Errorf("Timeout exceeded (%s) while waiting for command to not return an error: %s", duration.String(), cmd)
-			default:
-				out, err := c.Execute(cmd)
-				if err == nil {
-					outCh <- out
-				}
+				return
+			case ch <- c.ExecuteRemote(node, command, printStdout):
 				time.Sleep(sleep)
 			}
 		}
 	}()
 	for {
 		select {
-		case err := <-errCh:
-			return nil, err
-		case out := <-outCh:
-			return out, nil
+		case result := <-ch:
+			mostRecentExecuteRemoteWithRetryError = result
+			if mostRecentExecuteRemoteWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("ExecuteRemoteWithRetry timed out: %s\n", mostRecentExecuteRemoteWithRetryError)
 		}
 	}
 }

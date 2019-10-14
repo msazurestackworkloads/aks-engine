@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -117,7 +118,7 @@ func (cli *CLIProvisioner) provision() error {
 
 	os.Setenv("DNS_PREFIX", cli.Config.Name)
 
-	err := cli.Account.CreateGroup(cli.Config.Name, cli.Config.Location)
+	err := cli.Account.CreateGroupWithRetry(cli.Config.Name, cli.Config.Location, 3*time.Second, cli.Config.Timeout)
 	if err != nil {
 		return errors.Wrap(err, "Error while trying to create resource group")
 	}
@@ -128,47 +129,52 @@ func (cli *CLIProvisioner) provision() error {
 	masterSubnetID := fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/virtualNetworks/%s/subnets/%s", cli.Account.SubscriptionID, cli.Account.ResourceGroup.Name, vnetName, masterSubnetName)
 	agentSubnetID := ""
 	agentSubnetIDs := []string{}
+	subnets := []string{}
+	config, err := engine.ParseConfig(cli.Config.CurrentWorkingDir, cli.Config.ClusterDefinition, cli.Config.Name)
+	if err != nil {
+		log.Printf("Error while trying to build Engine Configuration:%s\n", err)
+	}
+	cs, err := engine.ParseInput(config.ClusterDefinitionPath)
+	if err != nil {
+		return err
+	}
 
 	if cli.CreateVNET {
 		if cli.MasterVMSS {
 			agentSubnetName := fmt.Sprintf("%sCustomSubnetAgent", cli.Config.Name)
-			err = cli.Account.CreateVnet(vnetName, "10.239.0.0/16")
+			err = cli.Account.CreateVnetWithRetry(vnetName, "10.239.0.0/16", 3*time.Second, cli.Config.Timeout)
 			if err != nil {
 				return errors.Errorf("Error trying to create vnet:%s", err.Error())
 			}
-			err = cli.Account.CreateSubnet(vnetName, masterSubnetName, "10.239.0.0/17")
+			err = cli.Account.CreateSubnetWithRetry(vnetName, masterSubnetName, "10.239.0.0/17", 3*time.Second, cli.Config.Timeout)
 			if err != nil {
 				return errors.Errorf("Error trying to create subnet:%s", err.Error())
 			}
-			err = cli.Account.CreateSubnet(vnetName, agentSubnetName, "10.239.128.0/17")
+			subnets = append(subnets, masterSubnetName)
+			err = cli.Account.CreateSubnetWithRetry(vnetName, agentSubnetName, "10.239.128.0/17", 3*time.Second, cli.Config.Timeout)
 			if err != nil {
 				return errors.Errorf("Error trying to create subnet in subnet:%s", err.Error())
 			}
-
+			subnets = append(subnets, agentSubnetName)
 			agentSubnetID = fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/virtualNetworks/%s/subnets/%s", cli.Account.SubscriptionID, cli.Account.ResourceGroup.Name, vnetName, agentSubnetName)
+
 		} else {
-			config, err := engine.ParseConfig(cli.Config.CurrentWorkingDir, cli.Config.ClusterDefinition, cli.Config.Name)
-			if err != nil {
-				log.Printf("Error while trying to build Engine Configuration:%s\n", err)
-			}
-			cs, err := engine.ParseInput(config.ClusterDefinitionPath)
-			if err != nil {
-				return err
-			}
-			err = cli.Account.CreateVnet(vnetName, "10.239.0.0/16")
+			err = cli.Account.CreateVnetWithRetry(vnetName, "10.239.0.0/16", 3*time.Second, cli.Config.Timeout)
 			if err != nil {
 				return errors.Errorf("Error trying to create vnet:%s", err.Error())
 			}
-			err = cli.Account.CreateSubnet(vnetName, masterSubnetName, "10.239.255.0/24")
+			err = cli.Account.CreateSubnetWithRetry(vnetName, masterSubnetName, "10.239.255.0/24", 3*time.Second, cli.Config.Timeout)
 			if err != nil {
 				return errors.Errorf("Error trying to create subnet:%s", err.Error())
 			}
+			subnets = append(subnets, masterSubnetName)
 			for i, pool := range cs.ContainerService.Properties.AgentPoolProfiles {
 				subnetName := fmt.Sprintf("%sCustomSubnet", pool.Name)
-				err = cli.Account.CreateSubnet(vnetName, subnetName, fmt.Sprintf("10.239.%d.0/24", i+1))
+				err = cli.Account.CreateSubnetWithRetry(vnetName, subnetName, fmt.Sprintf("10.239.%d.0/22", i*4), 3*time.Second, cli.Config.Timeout)
 				if err != nil {
 					return errors.Errorf("Error trying to create subnet:%s", err.Error())
 				}
+				subnets = append(subnets, subnetName)
 				subnetID = fmt.Sprintf("/subscriptions/%s/resourceGroups/%s/providers/Microsoft.Network/virtualNetworks/%s/subnets/%s", cli.Account.SubscriptionID, cli.Account.ResourceGroup.Name, vnetName, subnetName)
 				agentSubnetIDs = append(agentSubnetIDs, subnetID)
 			}
@@ -199,9 +205,22 @@ func (cli *CLIProvisioner) provision() error {
 		return errors.Wrap(err, "Error in generateAndDeploy:%s")
 	}
 
+	if cs.Properties.OrchestratorProfile != nil && cs.Properties.OrchestratorProfile.KubernetesConfig != nil {
+		if cli.CreateVNET && cs.Properties.OrchestratorProfile.KubernetesConfig.NetworkPlugin == "kubenet" {
+			routeTable, err := cli.Account.GetRGRouteTable(10 * time.Minute)
+			if err != nil {
+				return errors.Errorf("Error trying to get route table in VNET: %s", err.Error())
+			}
+			err = cli.Account.AddSubnetsToRouteTable(*routeTable.ID, vnetName, subnets)
+			if err != nil {
+				return errors.Errorf("Error trying to add subnets to route table %s in VNET: %s", *routeTable.ID, err.Error())
+			}
+		}
+	}
+
 	if cli.Config.IsKubernetes() {
 		// Store the hosts for future introspection
-		hosts, err := cli.Account.GetHosts(cli.Config.Name)
+		hosts, err := cli.Account.GetHostsWithRetry(cli.Config.Name, 3*time.Second, cli.Config.Timeout)
 		if err != nil {
 			return errors.Wrap(err, "GetHosts:%s")
 		}
@@ -242,7 +261,9 @@ func (cli *CLIProvisioner) generateAndDeploy() error {
 	if err != nil {
 		return errors.Wrap(err, "unable to parse config")
 	}
-	csGenerated, err := engine.ParseOutput(engCfg.GeneratedDefinitionPath + "/apimodel.json")
+	validate := true
+	isUpdate := false
+	csGenerated, err := engine.ParseOutput(engCfg.GeneratedDefinitionPath+"/apimodel.json", validate, isUpdate)
 	if err != nil {
 		return errors.Wrap(err, "unable to parse output")
 	}
@@ -256,7 +277,7 @@ func (cli *CLIProvisioner) generateAndDeploy() error {
 
 	//if we use Generate, then we need to call CreateDeployment
 	if !cli.Config.UseDeployCommand {
-		err = cli.Account.CreateDeployment(cli.Config.Name, cli.Engine)
+		err = cli.Account.CreateDeploymentWithRetry(cli.Config.Name, cli.Engine, 30*time.Second, 60*time.Minute)
 		if err != nil {
 			return errors.Wrap(err, "Error while trying to create deployment")
 		}
@@ -276,22 +297,48 @@ func (cli *CLIProvisioner) waitForNodes() error {
 	if cli.Config.IsKubernetes() {
 		if !cli.IsPrivate() {
 			log.Println("Waiting on nodes to go into ready state...")
-			ready := node.WaitOnReady(cli.Engine.NodeCount(), 10*time.Second, cli.Config.Timeout)
-			cmd := exec.Command("kubectl", "get", "nodes", "-o", "wide")
+			var expectedReadyNodes int
+			if !cli.Engine.ExpandedDefinition.Properties.HasLowPriorityScaleset() {
+				expectedReadyNodes = cli.Engine.NodeCount()
+				log.Printf("Checking for %d Ready nodes\n", expectedReadyNodes)
+			} else {
+				expectedReadyNodes = -1
+			}
+			ready := node.WaitOnReady(expectedReadyNodes, 10*time.Second, cli.Config.Timeout)
+			cmd := exec.Command("k", "get", "nodes", "-o", "wide")
 			out, _ := cmd.CombinedOutput()
 			log.Printf("%s\n", out)
 			if !ready {
 				return errors.New("Error: Not all nodes in a healthy state")
 			}
-			var version string
-			var err error
-			if cli.Config.IsKubernetes() {
-				version, err = node.Version()
-			}
+			nodes, err := node.GetWithRetry(1*time.Second, cli.Config.Timeout)
 			if err != nil {
-				log.Printf("Ready nodes did not return a version: %s", err)
+				return errors.Wrap(err, "Unable to get the list of nodes")
 			}
-			log.Printf("Testing a %s %s cluster...\n", cli.Config.Orchestrator, version)
+			if !cli.Engine.ExpandedDefinition.Properties.HasLowPriorityScaleset() {
+				for _, n := range nodes {
+					exp, err := regexp.Compile("k8s-master")
+					if err != nil {
+						return err
+					}
+					if !exp.MatchString(n.Metadata.Name) {
+						cmd := exec.Command("k", "label", "node", n.Metadata.Name, "foo=bar")
+						util.PrintCommand(cmd)
+						out, err := cmd.CombinedOutput()
+						log.Printf("%s\n", out)
+						if err != nil {
+							return errors.Wrapf(err, "Unable to assign label to node %s", n.Metadata.Name)
+						}
+						cmd = exec.Command("k", "annotate", "node", n.Metadata.Name, "foo=bar")
+						util.PrintCommand(cmd)
+						out, err = cmd.CombinedOutput()
+						log.Printf("%s\n", out)
+						if err != nil {
+							return errors.Wrapf(err, "Unable to add node annotation to node %s", n.Metadata.Name)
+						}
+					}
+				}
+			}
 		} else {
 			log.Println("This cluster is private")
 			if cli.Engine.ClusterDefinition.Properties.OrchestratorProfile.KubernetesConfig.PrivateCluster.JumpboxProfile == nil {
@@ -323,13 +370,14 @@ func (cli *CLIProvisioner) FetchProvisioningMetrics(path string, cfg *config.Con
 	}
 	authSock := strings.Split(strings.Split(string(out), "=")[1], ";")
 	os.Setenv("SSH_AUTH_SOCK", authSock[0])
-	conn, err := remote.NewConnection(hostname, "22", cli.Engine.ClusterDefinition.Properties.LinuxProfile.AdminUsername, cli.Config.GetSSHKeyPath())
+	var conn *remote.Connection
+	conn, err = remote.NewConnectionWithRetry(hostname, "22", cli.Engine.ClusterDefinition.Properties.LinuxProfile.AdminUsername, cli.Config.GetSSHKeyPath(), 3*time.Second, cli.Config.Timeout)
 	if err != nil {
 		return err
 	}
 	for _, master := range cli.Masters {
 		for _, fp := range masterFiles {
-			err := conn.CopyRemote(master.Name, fp)
+			err = conn.CopyFrom(master.Name, fp)
 			if err != nil {
 				log.Printf("Error reading file from path (%s):%s", path, err)
 			}
@@ -338,7 +386,7 @@ func (cli *CLIProvisioner) FetchProvisioningMetrics(path string, cfg *config.Con
 
 	for _, agent := range cli.Agents {
 		for _, fp := range agentFiles {
-			err := conn.CopyRemote(agent.Name, fp)
+			err = conn.CopyFrom(agent.Name, fp)
 			if err != nil {
 				log.Printf("Error reading file from path (%s):%s", path, err)
 			}

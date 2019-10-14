@@ -16,9 +16,12 @@ bin/
 coverage.txt
 
 test/junit/
+test/e2e/kubernetes/junit.xml
 test/aks-engine-test/aks-engine-test.exe
 pkg/operations/junit.xml
 pkg/operations/kubernetesupgrade/junit.xml
+pkg/engine/templates.go
+pkg/i18n/translations.go
 
 _logs/
 test/aks-engine-test/report/TestReport.json
@@ -29,6 +32,7 @@ test/e2e/kubernetes/translations/
 
 # test outputs
 cmd/_test_output
+test/e2e/kubernetes/kubernetes.test
 
 # packer
 packer/settings.json

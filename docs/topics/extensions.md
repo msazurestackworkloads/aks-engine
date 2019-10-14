@@ -83,7 +83,6 @@ Or they can be referenced as a preprovision extension, this will run during clou
           "name": "hello-world",
           "singleOrAll": "All"
       }
-
   },
   "extensionProfiles": [
     {
@@ -136,11 +135,11 @@ The following is an example of the template.json file.
    "$schema": "http://schema.management.azure.com/schemas/2015-01-01/deploymentTemplate.json#",
    "contentVersion": "1.0.0.0",
    "parameters": {
-        "apiVersionStorage": {
+        "apiVersionDeployments": {
             "type": "string",
             "minLength": 1,
             "metadata": {
-                "description": "Storage API Version"
+                "description": "Deployments API Version"
             }
         },
         "apiVersionCompute": {
@@ -179,7 +178,7 @@ The following is an example of the template.json file.
    },
    "resources": [
     {
-      "apiVersion": "[parameters('apiVersionStorage')]",
+      "apiVersion": "[parameters('apiVersionDeployments')]",
       "dependsOn": [],
       "location": "[resourceGroup().location]",
       "name": "[variables('sampleStorageAccountName')]",
@@ -227,7 +226,7 @@ Replace "**EXTENSION-NAME**" with the name of the extension.
 {
     "name": "EXTENSION-NAME",
     "type": "Microsoft.Resources/deployments",
-    "apiVersion": "[variables('apiVersionCompute')]",
+    "apiVersion": "[variables('apiVersionDeployments')]",
     "dependsOn": [
         "vmLoopNode"
     ],
@@ -238,8 +237,8 @@ Replace "**EXTENSION-NAME**" with the name of the extension.
             "contentVersion": "1.0.0.0"
         },
         "parameters": {
-            "apiVersionCompute": {
-                "value": "[variables('apiVersionCompute')]"
+            "apiVersionDeployments": {
+                "value": "[variables('apiVersionDeployments')]"
             },
             "username": {
                 "value": "[parameters('linuxAdminUsername')]"
@@ -302,4 +301,4 @@ The current list of known extensions can be found [in extensions/](https://githu
 
 ## Known issues
 
-Kubernetes extensions that run after provisioning don't currently work if the VM needs to reboot for security reboots. this is a timing issue. the extension script is started before the vm reboots and it will be cutoff before it finishes but will still report success. I've tried to get the provision script to only finish as reboot happens and I haven't gotten that to work. An extension could work most of the time if it cancelled the restart at the start and checked if a restart was needed and scheduled one at the end of its work
+Kubernetes extensions that run after provisioning don't currently work if the VM needs to reboot for security reboots. This is a timing issue. The extension script is started before the vm reboots and it will be cutoff before it finishes but will still report success. I've tried to get the provision script to only finish as reboot happens and I haven't gotten that to work. An extension could work most of the time if it cancelled the restart at the start and checked if a restart was needed and scheduled one at the end of its work.

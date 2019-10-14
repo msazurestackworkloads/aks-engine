@@ -295,7 +295,9 @@
         "cloudProviderBackoffExponent": "0",
         "cloudProviderRateLimit": false,
         "cloudProviderRateLimitQPS": "0",
-        "cloudProviderRateLimitBucket": 0
+        "cloudProviderRateLimitQPSWrite": "0",
+        "cloudProviderRateLimitBucket": 0,
+        "cloudProviderRateLimitBucketWrite": 0
       }
     },
 {{if IsKubernetesVersionGe "1.12.0"}}
@@ -319,15 +321,8 @@
       "type": "string"
     },
 {{end}}
-    "dockerEngineDownloadRepo": {
-      "defaultValue": "https://aptdocker.azureedge.net/repo",
-      "metadata": {
-        "description": "The Docker Engine download URL for Kubernetes."
-      },
-      "type": "string"
-    },
     "mobyVersion": {
-      "defaultValue": "3.0.4",
+      "defaultValue": "3.0.7",
       "metadata": {
         "description": "The Azure Moby build version"
       },
@@ -335,7 +330,10 @@
          "3.0.1",
          "3.0.2",
          "3.0.3",
-         "3.0.4"
+         "3.0.4",
+         "3.0.5",
+         "3.0.6",
+         "3.0.7"
        ],
       "type": "string"
     },
@@ -381,11 +379,10 @@
     "containerRuntime": {
       "defaultValue": "{{.OrchestratorProfile.KubernetesConfig.ContainerRuntime}}",
       "metadata": {
-        "description": "The container runtime to use (docker|clear-containers|kata-containers|containerd)"
+        "description": "The container runtime to use (docker|kata-containers|containerd)"
       },
       "allowedValues": [
         "docker",
-        "clear-containers",
         "kata-containers",
         "containerd"
       ],
@@ -421,6 +418,13 @@
       },
       "type": "string"
     },
+    "vnetCidrIPv6": {
+      "defaultValue": "{{GetDefaultVNETCIDRIPv6}}",
+      "metadata": {
+        "description": "Cluster vnet cidr IPv6"
+      },
+      "type": "string"
+    },
     "gcHighThreshold": {
       "defaultValue": 85,
       "metadata": {
@@ -435,14 +439,20 @@
       },
       "type": "int"
     },
-    "kuberneteselbsvcname": {
-      "defaultValue": "",
-      "metadata": {
-        "description": "elb service for standard lb"
-      },
-      "type": "string"
-    },
 {{ if not UseManagedIdentity }}
+    "servicePrincipalClientId": {
+      "metadata": {
+        "description": "Client ID (used by cloudprovider)"
+      },
+      "type": "securestring"
+    },
+    "servicePrincipalClientSecret": {
+      "metadata": {
+        "description": "The Service Principal Client Secret."
+      },
+      "type": "securestring"
+    },
+{{ else if and UseManagedIdentity IsHostedMaster}}
     "servicePrincipalClientId": {
       "metadata": {
         "description": "Client ID (used by cloudprovider)"
@@ -533,7 +543,7 @@
       "type": "string"
     }
 {{end}}
-{{if HasCustomSearchDomain}}
+{{if HasLinuxProfile}}{{if HasCustomSearchDomain}}
     ,"searchDomainName": {
       "defaultValue": "",
       "metadata": {
@@ -555,8 +565,8 @@
       },
       "type": "securestring"
     }
-{{end}}
-{{if HasCustomNodesDNS}}
+{{end}}{{end}}
+{{if HasLinuxProfile}}{{if HasCustomNodesDNS}}
     ,"dnsServer": {
       "defaultValue": "",
       "metadata": {
@@ -564,7 +574,7 @@
       },
       "type": "string"
     }
-{{end}}
+{{end}}{{end}}
 
 {{if EnableEncryptionWithExternalKms}}
    ,
@@ -593,6 +603,20 @@
       "defaultValue": "",
       "metadata": {
         "description": "Azure CNI networkmonitor Image URL"
+      },
+      "type": "string"
+    }
+ {{end}}
+ {{if .OrchestratorProfile.KubernetesConfig.IsAppGWIngressEnabled}}
+    ,"appGwSubnet": {
+      "metadata": {
+        "description": "Sets the subnet of the Application Gateway"
+      },
+      "type": "string"
+    }
+    ,"appGwSku": {
+      "metadata": {
+        "description": "Sets the subnet of the Application Gateway"
       },
       "type": "string"
     }

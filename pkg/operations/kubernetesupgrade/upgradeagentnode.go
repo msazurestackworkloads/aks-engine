@@ -7,14 +7,17 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/armhelpers"
 	"github.com/Azure/aks-engine/pkg/i18n"
 	"github.com/Azure/aks-engine/pkg/operations"
 	"github.com/sirupsen/logrus"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -38,6 +41,7 @@ type UpgradeAgentNode struct {
 	Client                  armhelpers.AKSEngineClient
 	kubeConfig              string
 	timeout                 time.Duration
+	cordonDrainTimeout      time.Duration
 }
 
 // DeleteNode takes state/resources of the master/agent node from ListNodeResources
@@ -48,10 +52,17 @@ func (kan *UpgradeAgentNode) DeleteNode(vmName *string, drain bool) error {
 	var kubeAPIServerURL string
 
 	if kan.UpgradeContainerService.Properties.HostedMasterProfile != nil {
-		kubeAPIServerURL = kan.UpgradeContainerService.Properties.HostedMasterProfile.FQDN
+		apiServerListeningPort := 443
+		kubeAPIServerURL = fmt.Sprintf("https://%s:%d", kan.UpgradeContainerService.Properties.HostedMasterProfile.FQDN, apiServerListeningPort)
 	} else {
 		kubeAPIServerURL = kan.UpgradeContainerService.Properties.MasterProfile.FQDN
 	}
+
+	if vmName == nil || *vmName == "" {
+		return errors.Errorf("Error deleting VM: VM name was empty")
+	}
+
+	nodeName := strings.ToLower(*vmName)
 
 	client, err := kan.Client.GetKubernetesClient(kubeAPIServerURL, kan.kubeConfig, interval, kan.timeout)
 	if err != nil {
@@ -59,19 +70,19 @@ func (kan *UpgradeAgentNode) DeleteNode(vmName *string, drain bool) error {
 	}
 	// Cordon and drain the node
 	if drain {
-		err := operations.SafelyDrainNodeWithClient(client, kan.logger, *vmName, time.Minute)
+		err = operations.SafelyDrainNodeWithClient(client, kan.logger, nodeName, kan.cordonDrainTimeout)
 		if err != nil {
 			kan.logger.Warningf("Error draining agent VM %s. Proceeding with deletion. Error: %v", *vmName, err)
 			// Proceed with deletion anyways
 		}
 	}
 	// Delete VM in ARM
-	if err := operations.CleanDeleteVirtualMachine(kan.Client, kan.logger, kan.SubscriptionID, kan.ResourceGroup, *vmName); err != nil {
+	if err = operations.CleanDeleteVirtualMachine(kan.Client, kan.logger, kan.SubscriptionID, kan.ResourceGroup, *vmName); err != nil {
 		return err
 	}
 	// Delete VM in api server
-	if err = client.DeleteNode(*vmName); err != nil {
-		statusErr, ok := err.(*errors.StatusError)
+	if err = client.DeleteNode(nodeName); err != nil {
+		statusErr, ok := err.(*apierrors.StatusError)
 		if ok && statusErr.ErrStatus.Reason != v1.StatusReasonNotFound {
 			kan.logger.Warnf("Node %s got an error while deregistering: %#v", *vmName, err)
 		}
@@ -107,15 +118,18 @@ func (kan *UpgradeAgentNode) Validate(vmName *string) error {
 		kan.logger.Warningf("VM name was empty. Skipping node condition check")
 		return nil
 	}
-	kan.logger.Infof("Validating %s", *vmName)
-	var masterURL string
+	nodeName := strings.ToLower(*vmName)
+
+	kan.logger.Infof("Validating %s", nodeName)
+	var apiserverURL string
 	if kan.UpgradeContainerService.Properties.HostedMasterProfile != nil {
-		masterURL = kan.UpgradeContainerService.Properties.HostedMasterProfile.FQDN
+		apiServerListeningPort := 443
+		apiserverURL = fmt.Sprintf("https://%s:%d", kan.UpgradeContainerService.Properties.HostedMasterProfile.FQDN, apiServerListeningPort)
 	} else {
-		masterURL = kan.UpgradeContainerService.Properties.MasterProfile.FQDN
+		apiserverURL = kan.UpgradeContainerService.Properties.MasterProfile.FQDN
 	}
 
-	client, err := kan.Client.GetKubernetesClient(masterURL, kan.kubeConfig, interval, kan.timeout)
+	client, err := kan.Client.GetKubernetesClient(apiserverURL, kan.kubeConfig, interval, kan.timeout)
 	if err != nil {
 		return &armhelpers.DeploymentValidationError{Err: err}
 	}
@@ -126,18 +140,23 @@ func (kan *UpgradeAgentNode) Validate(vmName *string) error {
 		select {
 		case <-timeoutTimer.C:
 			retryTimer.Stop()
-			return &armhelpers.DeploymentValidationError{Err: kan.Translator.Errorf("Node was not ready within %v", kan.timeout)}
-		case <-retryTimer.C:
-			agentNode, err := client.GetNode(*vmName)
+			err := kan.DeleteNode(vmName, false)
 			if err != nil {
-				kan.logger.Infof("Agent VM: %s status error: %v", *vmName, err)
+				kan.logger.Errorf("Error deleting agent VM %s: %v", *vmName, err)
+				return &armhelpers.DeploymentValidationError{Err: kan.Translator.Errorf("Node was not ready within %v. Failed to delete node %s, error: %v", kan.timeout, *vmName, err)}
+			}
+			return &armhelpers.DeploymentValidationError{Err: kan.Translator.Errorf("Node was not ready within %v. Succeeded to delete node %s.", kan.timeout, *vmName)}
+		case <-retryTimer.C:
+			agentNode, err := client.GetNode(nodeName)
+			if err != nil {
+				kan.logger.Infof("Agent node: %s status error: %v", nodeName, err)
 				retryTimer.Reset(retry)
 			} else if isNodeReady(agentNode) {
-				kan.logger.Infof("Agent VM: %s is ready", *vmName)
+				kan.logger.Infof("Agent node: %s is ready", nodeName)
 				timeoutTimer.Stop()
 				return nil
 			} else {
-				kan.logger.Infof("Agent VM: %s not ready yet...", *vmName)
+				kan.logger.Infof("Agent node: %s not ready yet...", nodeName)
 				retryTimer.Reset(retry)
 			}
 		}

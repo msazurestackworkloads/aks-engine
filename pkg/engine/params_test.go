@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Azure/aks-engine/pkg/api"
+	"github.com/Azure/aks-engine/pkg/helpers"
 	"github.com/Azure/aks-engine/pkg/i18n"
 	"github.com/leonelquinteros/gotext"
 )
@@ -37,11 +38,12 @@ func TestAssignParameters(t *testing.T) {
 		}
 
 		containerService.Location = "eastus"
-		containerService.SetPropertiesDefaults(false, false)
-		parametersMap, err := getParameters(containerService, DefaultGeneratorCode, "testversion")
-		if err != nil {
-			t.Errorf("should not get error when populating parameters")
-		}
+		containerService.SetPropertiesDefaults(api.PropertiesDefaultsParams{
+			IsScale:    false,
+			IsUpgrade:  false,
+			PkiKeySize: helpers.DefaultPkiKeySize,
+		})
+		parametersMap := getParameters(containerService, DefaultGeneratorCode, "testversion")
 		for k, v := range parametersMap {
 			switch val := v.(paramsMap)["value"].(type) {
 			case *bool:

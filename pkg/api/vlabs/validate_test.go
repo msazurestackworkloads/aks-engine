@@ -8,7 +8,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Azure/go-autorest/autorest/azure"
 	"github.com/Azure/go-autorest/autorest/to"
 
 	"github.com/Azure/aks-engine/pkg/api/common"
@@ -61,7 +60,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 					},
 				},
 			},
-			expectedError: "Invalid etcd version \"1.0.0\", please use one of the following versions: [2.2.5 2.3.0 2.3.1 2.3.2 2.3.3 2.3.4 2.3.5 2.3.6 2.3.7 2.3.8 3.0.0 3.0.1 3.0.2 3.0.3 3.0.4 3.0.5 3.0.6 3.0.7 3.0.8 3.0.9 3.0.10 3.0.11 3.0.12 3.0.13 3.0.14 3.0.15 3.0.16 3.0.17 3.1.0 3.1.1 3.1.2 3.1.2 3.1.3 3.1.4 3.1.5 3.1.6 3.1.7 3.1.8 3.1.9 3.1.10 3.2.0 3.2.1 3.2.2 3.2.3 3.2.4 3.2.5 3.2.6 3.2.7 3.2.8 3.2.9 3.2.11 3.2.12 3.2.13 3.2.14 3.2.15 3.2.16 3.2.23 3.2.24 3.2.25 3.3.0 3.3.1 3.3.8 3.3.9 3.3.10]",
+			expectedError: "Invalid etcd version \"1.0.0\", please use one of the following versions: [2.2.5 2.3.0 2.3.1 2.3.2 2.3.3 2.3.4 2.3.5 2.3.6 2.3.7 2.3.8 3.0.0 3.0.1 3.0.2 3.0.3 3.0.4 3.0.5 3.0.6 3.0.7 3.0.8 3.0.9 3.0.10 3.0.11 3.0.12 3.0.13 3.0.14 3.0.15 3.0.16 3.0.17 3.1.0 3.1.1 3.1.2 3.1.2 3.1.3 3.1.4 3.1.5 3.1.6 3.1.7 3.1.8 3.1.9 3.1.10 3.2.0 3.2.1 3.2.2 3.2.3 3.2.4 3.2.5 3.2.6 3.2.7 3.2.8 3.2.9 3.2.11 3.2.12 3.2.13 3.2.14 3.2.15 3.2.16 3.2.23 3.2.24 3.2.25 3.2.26 3.3.0 3.3.1 3.3.8 3.3.9 3.3.10 3.3.13 3.3.15]",
 		},
 		"should error when KubernetesConfig has invalid containerd version for containerd runtime": {
 			properties: &Properties{
@@ -69,18 +68,6 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 					OrchestratorType: "Kubernetes",
 					KubernetesConfig: &KubernetesConfig{
 						ContainerRuntime:  Containerd,
-						ContainerdVersion: "1.0.0",
-					},
-				},
-			},
-			expectedError: "Invalid containerd version \"1.0.0\", please use one of the following versions: [1.1.5 1.1.6 1.2.4]",
-		},
-		"should error when KubernetesConfig has invalid containerd version for clear-containers runtime": {
-			properties: &Properties{
-				OrchestratorProfile: &OrchestratorProfile{
-					OrchestratorType: "Kubernetes",
-					KubernetesConfig: &KubernetesConfig{
-						ContainerRuntime:  ClearContainers,
 						ContainerdVersion: "1.0.0",
 					},
 				},
@@ -109,7 +96,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 					},
 				},
 			},
-			expectedError: fmt.Sprintf("containerdVersion is only valid in a non-docker context, use %s, %s, or %s containerRuntime values instead if you wish to provide a containerdVersion", Containerd, ClearContainers, KataContainers),
+			expectedError: fmt.Sprintf("containerdVersion is only valid in a non-docker context, use %s or %s containerRuntime values instead if you wish to provide a containerdVersion", Containerd, KataContainers),
 		},
 		"should error when KubernetesConfig has containerdVersion value for default (empty string) container runtime": {
 			properties: &Properties{
@@ -120,7 +107,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 					},
 				},
 			},
-			expectedError: fmt.Sprintf("containerdVersion is only valid in a non-docker context, use %s, %s, or %s containerRuntime values instead if you wish to provide a containerdVersion", Containerd, ClearContainers, KataContainers),
+			expectedError: fmt.Sprintf("containerdVersion is only valid in a non-docker context, use %s or %s containerRuntime values instead if you wish to provide a containerdVersion", Containerd, KataContainers),
 		},
 		"should error when KubernetesConfig has enableAggregatedAPIs enabled with an invalid version": {
 			properties: &Properties{
@@ -138,7 +125,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 			properties: &Properties{
 				OrchestratorProfile: &OrchestratorProfile{
 					OrchestratorType:    "Kubernetes",
-					OrchestratorVersion: "1.9.11",
+					OrchestratorVersion: "1.10.13",
 					KubernetesConfig: &KubernetesConfig{
 						EnableAggregatedAPIs: true,
 						EnableRbac:           &falseVal,
@@ -146,6 +133,18 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 				},
 			},
 			expectedError: "enableAggregatedAPIs requires the enableRbac feature as a prerequisite",
+		},
+		"should error when KubernetesConfig has enableRBAC disabled for >= 1.15": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType:    "Kubernetes",
+					OrchestratorVersion: common.GetLatestPatchVersion("1.15", common.GetAllSupportedKubernetesVersions(false, false)),
+					KubernetesConfig: &KubernetesConfig{
+						EnableRbac: &falseVal,
+					},
+				},
+			},
+			expectedError: fmt.Sprintf("RBAC support is required for Kubernetes version 1.15.0 or greater; unable to build Kubernetes v%s cluster with enableRbac=false", common.GetLatestPatchVersion("1.15", common.GetAllSupportedKubernetesVersions(false, false))),
 		},
 		"should error when KubernetesConfig has enableDataEncryptionAtRest enabled with invalid version": {
 			properties: &Properties{
@@ -163,7 +162,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 			properties: &Properties{
 				OrchestratorProfile: &OrchestratorProfile{
 					OrchestratorType:    "Kubernetes",
-					OrchestratorVersion: "1.9.11",
+					OrchestratorVersion: "1.10.13",
 					KubernetesConfig: &KubernetesConfig{
 						EnableDataEncryptionAtRest: &trueVal,
 						EtcdEncryptionKey:          "fakeEncryptionKey",
@@ -190,7 +189,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 					OrchestratorType:    "Kubernetes",
 					OrchestratorVersion: "1.6.9",
 					KubernetesConfig: &KubernetesConfig{
-						LoadBalancerSku: "Standard",
+						LoadBalancerSku: StandardLoadBalancerSku,
 					},
 				},
 			},
@@ -200,7 +199,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 			properties: &Properties{
 				OrchestratorProfile: &OrchestratorProfile{
 					OrchestratorType:    "Kubernetes",
-					OrchestratorVersion: "1.9.11",
+					OrchestratorVersion: "1.10.13",
 					KubernetesConfig: &KubernetesConfig{
 						EnablePodSecurityPolicy: &trueVal,
 					},
@@ -296,7 +295,7 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 			properties: &Properties{
 				OrchestratorProfile: &OrchestratorProfile{
 					OrchestratorType:    "Kubernetes",
-					OrchestratorVersion: "v1.9.10",
+					OrchestratorVersion: "v1.10.13",
 				},
 			},
 		},
@@ -310,6 +309,19 @@ func Test_OrchestratorProfile_Validate(t *testing.T) {
 				},
 			},
 			expectedError: "maximumLoadBalancerRuleCount shouldn't be less than 0",
+		},
+		"should error when outboundRuleIdleTimeoutInMinutes populated is out of valid range": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: "Kubernetes",
+					KubernetesConfig: &KubernetesConfig{
+						LoadBalancerSku:                  StandardLoadBalancerSku,
+						ExcludeMasterFromStandardLB:      to.BoolPtr(true),
+						OutboundRuleIdleTimeoutInMinutes: 3,
+					},
+				},
+			},
+			expectedError: "outboundRuleIdleTimeoutInMinutes shouldn't be less than 4 or greater than 120",
 		},
 	}
 
@@ -341,7 +353,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 	// Tests that should pass across all versions
 	for _, k8sVersion := range common.GetAllSupportedKubernetesVersions(true, false) {
 		c := KubernetesConfig{}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Errorf("should not error on empty KubernetesConfig: %v, version %s", err, k8sVersion)
 		}
 
@@ -366,21 +378,21 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--route-reconciliation-period": ValidKubernetesCtrlMgrRouteReconciliationPeriod,
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Errorf("should not error on a KubernetesConfig with valid param values: %v", err)
 		}
 
 		c = KubernetesConfig{
 			ClusterSubnet: "10.16.x.0/invalid",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid ClusterSubnet")
 		}
 
 		c = KubernetesConfig{
 			DockerBridgeSubnet: "10.120.1.0/invalid",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid DockerBridgeSubnet")
 		}
 
@@ -389,7 +401,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--non-masquerade-cidr": "10.120.1.0/24",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Error("should not error on valid --non-masquerade-cidr")
 		}
 
@@ -406,7 +418,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 		c = KubernetesConfig{
 			MaxPods: KubernetesMinMaxPods - 1,
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid MaxPods")
 		}
 
@@ -415,7 +427,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--node-status-update-frequency": "invalid",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid --node-status-update-frequency kubelet config")
 		}
 
@@ -424,7 +436,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--node-monitor-grace-period": "invalid",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid --node-monitor-grace-period")
 		}
 
@@ -436,7 +448,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--node-status-update-frequency": "10s",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when --node-monitor-grace-period is not sufficiently larger than --node-status-update-frequency kubelet config")
 		}
 
@@ -445,7 +457,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--pod-eviction-timeout": "invalid",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid --pod-eviction-timeout")
 		}
 
@@ -454,21 +466,21 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 				"--route-reconciliation-period": "invalid",
 			},
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error on invalid --route-reconciliation-period")
 		}
 
 		c = KubernetesConfig{
 			DNSServiceIP: "192.168.0.10",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when DNSServiceIP but not ServiceCidr")
 		}
 
 		c = KubernetesConfig{
 			ServiceCidr: "192.168.0.10/24",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when ServiceCidr but not DNSServiceIP")
 		}
 
@@ -476,7 +488,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "invalid",
 			ServiceCidr:  "192.168.0.0/24",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when DNSServiceIP is invalid")
 		}
 
@@ -484,7 +496,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "192.168.1.10",
 			ServiceCidr:  "192.168.0.0/not-a-len",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when ServiceCidr is invalid")
 		}
 
@@ -492,7 +504,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "192.168.1.10",
 			ServiceCidr:  "192.168.0.0/24",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when DNSServiceIP is outside of ServiceCidr")
 		}
 
@@ -500,7 +512,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "172.99.255.255",
 			ServiceCidr:  "172.99.0.1/16",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when DNSServiceIP is broadcast address of ServiceCidr")
 		}
 
@@ -508,7 +520,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "172.99.0.1",
 			ServiceCidr:  "172.99.0.1/16",
 		}
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when DNSServiceIP is first IP of ServiceCidr")
 		}
 
@@ -516,7 +528,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			DNSServiceIP: "172.99.255.10",
 			ServiceCidr:  "172.99.0.1/16",
 		}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Error("should not error when DNSServiceIP and ServiceCidr are valid")
 		}
 
@@ -525,7 +537,7 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			NetworkPlugin: "azure",
 		}
 
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when ClusterSubnet has a mask of 24 bits or higher")
 		}
 
@@ -533,24 +545,24 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			ProxyMode: KubeProxyMode("invalid"),
 		}
 
-		if err := c.Validate(k8sVersion, false); err == nil {
+		if err := c.Validate(k8sVersion, false, false); err == nil {
 			t.Error("should error when ProxyMode has an invalid string value")
 		}
 
 		for _, validProxyModeValue := range []KubeProxyMode{KubeProxyModeIPTables, KubeProxyModeIPVS} {
 			c = KubernetesConfig{
-				ProxyMode: KubeProxyMode(validProxyModeValue),
+				ProxyMode: validProxyModeValue,
 			}
 
-			if err := c.Validate(k8sVersion, false); err != nil {
+			if err := c.Validate(k8sVersion, false, false); err != nil {
 				t.Error("should error when ProxyMode has a valid string value")
 			}
 
 			c = KubernetesConfig{
-				ProxyMode: KubeProxyMode(validProxyModeValue),
+				ProxyMode: validProxyModeValue,
 			}
 
-			if err := c.Validate(k8sVersion, false); err != nil {
+			if err := c.Validate(k8sVersion, false, false); err != nil {
 				t.Error("should error when ProxyMode has a valid string value")
 			}
 		}
@@ -562,19 +574,101 @@ func Test_KubernetesConfig_Validate(t *testing.T) {
 			CloudProviderBackoff:   to.BoolPtr(true),
 			CloudProviderRateLimit: to.BoolPtr(true),
 		}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Error("should not error when basic backoff and rate limiting are set to true with no options")
 		}
 	}
 
-	trueVal := true
 	// Tests that apply to 1.8 and later releases
 	for _, k8sVersion := range common.GetVersionsGt(common.GetAllSupportedKubernetesVersions(true, false), "1.8.0", true, true) {
 		c := KubernetesConfig{
-			UseCloudControllerManager: &trueVal,
+			UseCloudControllerManager: to.BoolPtr(true),
 		}
-		if err := c.Validate(k8sVersion, false); err != nil {
+		if err := c.Validate(k8sVersion, false, false); err != nil {
 			t.Error("should not error because UseCloudControllerManager is available since v1.8")
+		}
+	}
+
+	// Tests that apply to dualstack with 1.16 and later releases
+	for _, k8sVersion := range common.GetVersionsGt(common.GetAllSupportedKubernetesVersions(false, false), "1.16.0", true, true) {
+		c := KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8",
+		}
+
+		if err := c.Validate(k8sVersion, false, false); err == nil {
+			t.Error("should error when more than 1 cluster subnet provided with ipv6dualstack feature disabled")
+		}
+
+		// validate config when ipv6 dual stack feature is enabled
+		c = KubernetesConfig{
+			NetworkPlugin: "azure",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err == nil {
+			t.Error("should error when network plugin is not kubenet")
+		}
+
+		c = KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8,fec0::/7",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err == nil {
+			t.Error("should error when more than 2 cluster subnets provided")
+		}
+
+		c = KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err == nil {
+			t.Error("should error when proxy mode is not set to ipvs")
+		}
+
+		c = KubernetesConfig{
+			ServiceCidr: "10.0.0.0/16,fe80:20d::/112",
+		}
+
+		if err := c.Validate(k8sVersion, false, false); err == nil {
+			t.Error("should error when more than 1 service cidr provided with ipv6dualstack feature disabled")
+		}
+
+		c = KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8",
+			ProxyMode:     "ipvs",
+			ServiceCidr:   "10.0.0.0/16,fe80:20d::/112,fec0::/7",
+			DNSServiceIP:  "10.0.0.10",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err == nil {
+			t.Error("should error when more than 2 service cidr provided with ipv6dualstack feature enabled")
+		}
+
+		c = KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8",
+			ProxyMode:     "ipvs",
+			ServiceCidr:   "10.0.0.0/16,2001:db8::/129",
+			DNSServiceIP:  "10.0.0.10",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err == nil {
+			t.Error("should error when secondary cidr is invalid with ipv6dualstack feature enabled")
+		}
+
+		c = KubernetesConfig{
+			NetworkPlugin: "kubenet",
+			ClusterSubnet: "10.244.0.0/16,ace:cab:deca::/8",
+			ProxyMode:     "ipvs",
+			ServiceCidr:   "10.0.0.0/16,fe80:20d::/112",
+			DNSServiceIP:  "10.0.0.10",
+		}
+
+		if err := c.Validate(k8sVersion, false, true); err != nil {
+			t.Error("shouldn't have errored with ipv6 dual stack feature enabled")
 		}
 	}
 }
@@ -595,6 +689,109 @@ func Test_Properties_ValidatePrivateAzureRegistryServer(t *testing.T) {
 	err = p.OrchestratorProfile.KubernetesConfig.validatePrivateAzureRegistryServer()
 	if err != nil {
 		t.Errorf("should not error because CustomHyperkubeImage is provided, got error : %s", err.Error())
+	}
+}
+
+func Test_Properties_ValidateDistro(t *testing.T) {
+	p := &Properties{}
+	p.OrchestratorProfile = &OrchestratorProfile{}
+	p.OrchestratorProfile.OrchestratorType = Kubernetes
+	p.MasterProfile = &MasterProfile{
+		DNSPrefix: "foo",
+	}
+
+	// Should not error on valid distros in non-update scenarios
+	for _, distro := range DistroValues {
+		p.MasterProfile.Distro = distro
+		p.AgentPoolProfiles = []*AgentPoolProfile{
+			{
+				Name:   "pool1",
+				Distro: distro,
+			},
+		}
+		if err := p.validateMasterProfile(false); err != nil {
+			t.Errorf(
+				"should not error on distro=\"%s\"",
+				distro,
+			)
+		}
+		if err := p.validateAgentPoolProfiles(false); err != nil {
+			t.Errorf(
+				"should not error on distro=\"%s\"",
+				distro,
+			)
+		}
+	}
+
+	// Should not error on valid distros in update scenarios
+	for _, distro := range DistroValues {
+		p.MasterProfile.Distro = distro
+		p.AgentPoolProfiles = []*AgentPoolProfile{
+			{
+				Name:   "pool1",
+				Distro: distro,
+			},
+		}
+		if err := p.validateMasterProfile(true); err != nil {
+			t.Errorf(
+				"should not error on distro=\"%s\"",
+				distro,
+			)
+		}
+		if err := p.validateAgentPoolProfiles(true); err != nil {
+			t.Errorf(
+				"should not error on distro=\"%s\"",
+				distro,
+			)
+		}
+	}
+
+	// Should error for invalid distros on non-update scenarios
+	bogusDistroValues := []Distro{AKSDockerEngine, AKS1604Deprecated, AKS1804Deprecated, "bogon"}
+	for _, distro := range bogusDistroValues {
+		p.MasterProfile.Distro = distro
+		p.AgentPoolProfiles = []*AgentPoolProfile{
+			{
+				Name:   "pool1",
+				Distro: distro,
+			},
+		}
+		if err := p.validateMasterProfile(false); err == nil {
+			t.Errorf(
+				"should error on distro=\"%s\"",
+				distro,
+			)
+		}
+		if err := p.validateAgentPoolProfiles(false); err == nil {
+			t.Errorf(
+				"should error on distro=\"%s\"",
+				distro,
+			)
+		}
+	}
+
+	// Should not error for deprecated distro on update scenarios
+	oldDistros := []Distro{AKSDockerEngine, AKS1604Deprecated, AKS1804Deprecated}
+	for _, distro := range oldDistros {
+		p.MasterProfile.Distro = distro
+		p.AgentPoolProfiles = []*AgentPoolProfile{
+			{
+				Name:   "pool1",
+				Distro: distro,
+			},
+		}
+		if err := p.validateMasterProfile(true); err != nil {
+			t.Errorf(
+				"should error on distro=\"%s\"",
+				distro,
+			)
+		}
+		if err := p.validateAgentPoolProfiles(true); err != nil {
+			t.Errorf(
+				"should error on distro=\"%s\"",
+				distro,
+			)
+		}
 	}
 }
 
@@ -639,7 +836,7 @@ func Test_Properties_ValidateNetworkPolicy(t *testing.T) {
 		)
 	}
 
-	p.OrchestratorProfile.KubernetesConfig.NetworkPolicy = "cilium"
+	p.OrchestratorProfile.KubernetesConfig.NetworkPolicy = NetworkPolicyCilium
 	if err := p.OrchestratorProfile.KubernetesConfig.validateNetworkPolicy(k8sVersion, true); err == nil {
 		t.Errorf(
 			"should error on cilium for windows clusters",
@@ -698,7 +895,7 @@ func Test_Properties_ValidateNetworkPluginPlusPolicy(t *testing.T) {
 	for _, config := range []k8sNetworkConfig{
 		{
 			networkPlugin: "azure",
-			networkPolicy: "cilium",
+			networkPolicy: NetworkPolicyCilium,
 		},
 		{
 			networkPlugin: "azure",
@@ -732,7 +929,7 @@ func Test_Properties_ValidateNetworkPluginPlusPolicy(t *testing.T) {
 func TestProperties_ValidateLinuxProfile(t *testing.T) {
 	cs := getK8sDefaultContainerService(true)
 	cs.Properties.LinuxProfile.SSH = struct {
-		PublicKeys []PublicKey `json:"publicKeys" validate:"required,len=1"`
+		PublicKeys []PublicKey `json:"publicKeys" validate:"required,min=1"`
 	}{
 		PublicKeys: []PublicKey{{}},
 	}
@@ -742,33 +939,81 @@ func TestProperties_ValidateLinuxProfile(t *testing.T) {
 	if err.Error() != expectedMsg {
 		t.Errorf("expected error message : %s to be thrown, but got : %s", expectedMsg, err.Error())
 	}
+
+	cs.Properties.LinuxProfile.SSH = struct {
+		PublicKeys []PublicKey `json:"publicKeys" validate:"required,min=1"`
+	}{
+		PublicKeys: []PublicKey{
+			{
+				KeyData: "not empty",
+			},
+			{},
+		},
+	}
+	expectedMsg = "KeyData in LinuxProfile.SSH.PublicKeys cannot be empty string"
+	err = cs.Validate(true)
+
+	if err.Error() != expectedMsg {
+		t.Errorf("expected error message : %s to be thrown, but got : %s", expectedMsg, err.Error())
+	}
 }
 
 func TestProperties_ValidateInvalidExtensions(t *testing.T) {
-
-	cs := getK8sDefaultContainerService(true)
-	cs.Properties.OrchestratorProfile.OrchestratorVersion = "1.10.7"
-
-	cs.Properties.AgentPoolProfiles = []*AgentPoolProfile{
+	tests := []struct {
+		name              string
+		agentPoolProfiles []*AgentPoolProfile
+		expectedErr       error
+	}{
 		{
-			Name:                "agentpool",
-			VMSize:              "Standard_D2_v2",
-			Count:               1,
-			AvailabilityProfile: VirtualMachineScaleSets,
-			Extensions: []Extension{
+			name: "Extensions for VirtualMachineScaleSets",
+			agentPoolProfiles: []*AgentPoolProfile{
 				{
-					Name:        "extensionName",
-					SingleOrAll: "single",
-					Template:    "fakeTemplate",
+					Name:                "agentpool",
+					VMSize:              "Standard_D2_v2",
+					Count:               1,
+					AvailabilityProfile: VirtualMachineScaleSets,
+					Extensions: []Extension{
+						{
+							Name:        "extensionName",
+							SingleOrAll: "single",
+							Template:    "fakeTemplate",
+						},
+					},
 				},
 			},
+			expectedErr: errors.New("Extensions are currently not supported with VirtualMachineScaleSets. Please specify \"availabilityProfile\": \"AvailabilitySet\""),
+		},
+		{
+			name: "prometheus-grafana-k8s extensions for Winows agents",
+			agentPoolProfiles: []*AgentPoolProfile{
+				{
+					Name:                "agentpool",
+					VMSize:              "Standard_D2_v2",
+					Count:               1,
+					AvailabilityProfile: AvailabilitySet,
+					OSType:              "Windows",
+					Extensions: []Extension{
+						{
+							Name: "prometheus-grafana-k8s",
+						},
+					},
+				},
+			},
+			expectedErr: errors.New("prometheus-grafana-k8s extension is currently not supported for Windows agents"),
 		},
 	}
-	err := cs.Validate(true)
-	expectedMsg := "Extensions are currently not supported with VirtualMachineScaleSets. Please specify \"availabilityProfile\": \"AvailabilitySet\""
 
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error message : %s to be thrown, but got %s", expectedMsg, err.Error())
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cs := getK8sDefaultContainerService(true)
+			cs.Properties.AgentPoolProfiles = test.agentPoolProfiles
+			err := cs.Validate(true)
+			if !helpers.EqualError(err, test.expectedErr) {
+				t.Errorf("expected error with message : %s, but got %s", test.expectedErr.Error(), err.Error())
+			}
+		})
 	}
 
 }
@@ -1038,7 +1283,7 @@ func getK8sDefaultContainerService(hasWindows bool) *ContainerService {
 		LinuxProfile: &LinuxProfile{
 			AdminUsername: "azureuser",
 			SSH: struct {
-				PublicKeys []PublicKey `json:"publicKeys" validate:"required,len=1"`
+				PublicKeys []PublicKey `json:"publicKeys" validate:"required,min=1"`
 			}{
 				PublicKeys: []PublicKey{{
 					KeyData: "publickeydata",
@@ -1096,18 +1341,6 @@ func Test_Properties_ValidateContainerRuntime(t *testing.T) {
 		)
 	}
 
-	p.OrchestratorProfile.KubernetesConfig.ContainerRuntime = ClearContainers
-	p.AgentPoolProfiles = []*AgentPoolProfile{
-		{
-			OSType: Windows,
-		},
-	}
-	if err := p.validateContainerRuntime(); err == nil {
-		t.Errorf(
-			"should error on clear-containers for windows clusters",
-		)
-	}
-
 	p.OrchestratorProfile.KubernetesConfig.ContainerRuntime = KataContainers
 	p.AgentPoolProfiles = []*AgentPoolProfile{
 		{
@@ -1130,28 +1363,6 @@ func Test_Properties_ValidateContainerRuntime(t *testing.T) {
 		t.Errorf(
 			"should error on containerd for windows clusters",
 		)
-	}
-}
-
-func TestAgentPoolProfileDistro(t *testing.T) {
-	p := &Properties{}
-	p.OrchestratorProfile = &OrchestratorProfile{}
-	p.OrchestratorProfile.OrchestratorType = Kubernetes
-	p.AgentPoolProfiles = []*AgentPoolProfile{
-		{
-			Distro: AKS,
-			VMSize: "Standard_NC6",
-		},
-		{
-			Distro: AKSDockerEngine,
-			VMSize: "Standard_NC6",
-		},
-	}
-	if err := p.AgentPoolProfiles[0].validateKubernetesDistro(); err == nil {
-		t.Errorf("should error on %s Distro with N Series VM SKU", AKS)
-	}
-	if err := p.AgentPoolProfiles[1].validateKubernetesDistro(); err != nil {
-		t.Errorf("should not error on %s Distro with N Series VM SKU", AKSDockerEngine)
 	}
 }
 
@@ -1263,6 +1474,170 @@ func Test_Properties_ValidateAddons(t *testing.T) {
 	if err := p.validateAddons(); err != nil {
 		t.Errorf(
 			"should not error on providing valid addon.Data",
+		)
+	}
+
+	p.AgentPoolProfiles = []*AgentPoolProfile{
+		{
+			AvailabilityProfile: AvailabilitySet,
+			Distro:              CoreOS,
+		},
+	}
+
+	p.MasterProfile = &MasterProfile{
+		Distro: CoreOS,
+	}
+
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		Addons: []KubernetesAddon{
+			{
+				Name:    "smb-flexvolume",
+				Enabled: to.BoolPtr(true),
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Errorf(
+			"should error using incompatible addon with coreos (smb-flexvolume)",
+		)
+	}
+
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		Addons: []KubernetesAddon{
+			{
+				Name:    "keyvault-flexvolume",
+				Enabled: to.BoolPtr(true),
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Errorf(
+			"should error using incompatible addon with coreos (keyvault-flexvolume)",
+		)
+	}
+
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		Addons: []KubernetesAddon{
+			{
+				Name:    "blobfuse-flexvolume",
+				Enabled: to.BoolPtr(true),
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Errorf(
+			"should error using incompatible addon with coreos (blobfuse-flexvolume)",
+		)
+	}
+
+	// appgw-ingress add-on
+
+	// Basic test with UseManagedIdentity
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		NetworkPlugin:      "azure",
+		UseManagedIdentity: true,
+		Addons: []KubernetesAddon{
+			{
+				Name:    "appgw-ingress",
+				Enabled: to.BoolPtr(true),
+				Config: map[string]string{
+					"appgw-subnet": "10.0.0.0/16",
+				},
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err != nil {
+		t.Error(
+			"should not error for correct config.",
+			err,
+		)
+	}
+
+	// Basic test with ObjectID
+	p.ServicePrincipalProfile = &ServicePrincipalProfile{
+		ObjectID: "random",
+	}
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		NetworkPlugin: "azure",
+		Addons: []KubernetesAddon{
+			{
+				Name:    "appgw-ingress",
+				Enabled: to.BoolPtr(true),
+				Config: map[string]string{
+					"appgw-subnet": "10.0.0.0/16",
+				},
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err != nil {
+		t.Error(
+			"should not error for correct config.",
+			err,
+		)
+	}
+
+	// Test with missing objectID and UseManagedIdentity false
+	p.ServicePrincipalProfile = &ServicePrincipalProfile{}
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		NetworkPlugin: "azure",
+		Addons: []KubernetesAddon{
+			{
+				Name:    "appgw-ingress",
+				Enabled: to.BoolPtr(true),
+				Config: map[string]string{
+					"appgw-subnet": "10.0.0.0/16",
+				},
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Error(
+			"should error as objectID not provided or UseManagedIdentity not true",
+			err,
+		)
+	}
+
+	// Test with wrong Network Plugin
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		NetworkPlugin: "kubelet",
+		Addons: []KubernetesAddon{
+			{
+				Name:    "appgw-ingress",
+				Enabled: to.BoolPtr(true),
+				Config: map[string]string{
+					"appgw-subnet": "10.0.0.0/16",
+				},
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Errorf(
+			"should error using when not using 'azure' for Network Plugin",
+		)
+	}
+
+	// Test with missing appgw-subnet
+	p.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+		NetworkPlugin: "azure",
+		Addons: []KubernetesAddon{
+			{
+				Name:    "appgw-ingress",
+				Enabled: to.BoolPtr(true),
+				Config:  map[string]string{},
+			},
+		},
+	}
+
+	if err := p.validateAddons(); err == nil {
+		t.Errorf(
+			"should error when missing the subnet for Application Gateway",
 		)
 	}
 }
@@ -1429,7 +1804,7 @@ func TestProperties_ValidateManagedIdentity(t *testing.T) {
 		agentPoolProfiles   []*AgentPoolProfile
 	}{
 		{
-			name:                "use managed identity with master vmss",
+			name:                "use managed identity with master VMSS",
 			orchestratorRelease: "1.11",
 			useManagedIdentity:  true,
 			userAssignedID:      "utaksenginetestid",
@@ -1483,7 +1858,7 @@ func TestProperties_ValidateManagedIdentity(t *testing.T) {
 			expectedErr: "user assigned identity can only be used with Kubernetes 1.12.0 or above. Please specify \"orchestratorRelease\": \"1.12\"",
 		},
 		{
-			name:                "user master vmss with empty user assigned ID",
+			name:                "user master VMSS with empty user assigned ID",
 			orchestratorRelease: "1.12",
 			useManagedIdentity:  true,
 			masterProfile: MasterProfile{
@@ -1573,17 +1948,6 @@ func TestMasterProfileValidate(t *testing.T) {
 			expectedErr: "imageName needs to be specified when imageResourceGroup is provided",
 		},
 		{
-			name:                "Master Profile with VMSS and Kubernetes v1.9.6",
-			orchestratorType:    Kubernetes,
-			orchestratorRelease: "1.9",
-			masterProfile: MasterProfile{
-				DNSPrefix:           "dummy",
-				Count:               3,
-				AvailabilityProfile: VirtualMachineScaleSets,
-			},
-			expectedErr: "VirtualMachineScaleSets are only available in Kubernetes version 1.10.0 or greater. Please set \"orchestratorVersion\" to 1.10.0 or above",
-		},
-		{
 			name:                "Master Profile with VMSS and storage account",
 			orchestratorType:    Kubernetes,
 			orchestratorRelease: "1.10",
@@ -1632,7 +1996,7 @@ func TestMasterProfileValidate(t *testing.T) {
 				},
 			}
 			cs.Properties.AgentPoolProfiles = test.agentPoolProfiles
-			err := cs.Properties.validateMasterProfile()
+			err := cs.Properties.validateMasterProfile(false)
 			if test.expectedErr == "" && err != nil ||
 				test.expectedErr != "" && (err == nil || test.expectedErr != err.Error()) {
 				t.Errorf("test %s: unexpected error %q\n", test.name, err)
@@ -1641,32 +2005,6 @@ func TestMasterProfileValidate(t *testing.T) {
 	}
 }
 
-func TestProperties_ValidateAddon(t *testing.T) {
-	cs := getK8sDefaultContainerService(true)
-	cs.Properties.AgentPoolProfiles = []*AgentPoolProfile{
-		{
-			Name:                "agentpool",
-			VMSize:              "Standard_NC6",
-			Count:               1,
-			AvailabilityProfile: AvailabilitySet,
-		},
-	}
-	cs.Properties.OrchestratorProfile.OrchestratorVersion = "1.9.10"
-	cs.Properties.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
-		Addons: []KubernetesAddon{
-			{
-				Name:    "nvidia-device-plugin",
-				Enabled: &trueVal,
-			},
-		},
-	}
-
-	err := cs.Validate(true)
-	expectedMsg := "NVIDIA Device Plugin add-on can only be used Kubernetes 1.10 or above. Please specify \"orchestratorRelease\": \"1.10\""
-	if err.Error() != expectedMsg {
-		t.Errorf("expected error with message : %s, but got : %s", expectedMsg, err.Error())
-	}
-}
 func TestProperties_ValidateZones(t *testing.T) {
 	tests := []struct {
 		name                        string
@@ -1774,7 +2112,7 @@ func TestProperties_ValidateZones(t *testing.T) {
 		{
 			name:                "all zones and basic loadbalancer",
 			orchestratorRelease: "1.12",
-			loadBalancerSku:     "Basic",
+			loadBalancerSku:     BasicLoadBalancerSku,
 			masterProfile: &MasterProfile{
 				Count:               5,
 				DNSPrefix:           "foo",
@@ -1796,7 +2134,7 @@ func TestProperties_ValidateZones(t *testing.T) {
 		{
 			name:                        "all zones with standard loadbalancer and false excludeMasterFromStandardLB",
 			orchestratorRelease:         "1.12",
-			loadBalancerSku:             "Standard",
+			loadBalancerSku:             StandardLoadBalancerSku,
 			excludeMasterFromStandardLB: false,
 			masterProfile: &MasterProfile{
 				Count:               5,
@@ -1838,6 +2176,112 @@ func TestProperties_ValidateZones(t *testing.T) {
 				}
 			} else {
 				t.Errorf("error should have occurred")
+			}
+		})
+	}
+}
+
+func TestProperties_ValidateLoadBalancer(t *testing.T) {
+	tests := []struct {
+		name                string
+		orchestratorRelease string
+		loadBalancerSku     string
+		masterProfile       *MasterProfile
+		agentProfiles       []*AgentPoolProfile
+		expectedErr         bool
+		expectedErrStr      string
+	}{
+		{
+			name:                "lowercase basic LB",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     "basic",
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+		},
+		{
+			name:                "Basic LB",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     BasicLoadBalancerSku,
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+		},
+		{
+			name:                "lowercase standard LB",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     "standard",
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+		},
+		{
+			name:                "Standard LB",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     StandardLoadBalancerSku,
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+		},
+		{
+			name:                "empty string LB value",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     "",
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+		},
+		{
+			name:                "invalid LB string value",
+			orchestratorRelease: "1.12",
+			loadBalancerSku:     "foo",
+			masterProfile: &MasterProfile{
+				Count:               3,
+				DNSPrefix:           "foo",
+				VMSize:              "Standard_DS2_v2",
+				AvailabilityProfile: VirtualMachineScaleSets,
+			},
+			expectedErr:    true,
+			expectedErrStr: fmt.Sprintf("Invalid value for loadBalancerSku, only %s and %s are supported", StandardLoadBalancerSku, BasicLoadBalancerSku),
+		},
+	}
+
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			cs := getK8sDefaultContainerService(true)
+			cs.Properties.MasterProfile = test.masterProfile
+			cs.Properties.AgentPoolProfiles = test.agentProfiles
+			cs.Properties.OrchestratorProfile.OrchestratorRelease = test.orchestratorRelease
+			cs.Properties.OrchestratorProfile.KubernetesConfig = &KubernetesConfig{
+				LoadBalancerSku: test.loadBalancerSku,
+			}
+
+			err := cs.Validate(false)
+			if test.expectedErr {
+				if err == nil {
+					t.Errorf("error should have occurred")
+				} else {
+					if err.Error() != test.expectedErrStr {
+						t.Errorf("expected error with message : %s, but got : %s", test.expectedErrStr, err.Error())
+					}
+				}
 			}
 		})
 	}
@@ -2256,6 +2700,33 @@ func TestValidateProperties_OrchestratorSpecificProperties(t *testing.T) {
 			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
 		}
 	})
+
+	t.Run("Should not support os type other than linux for ipv6 dual stack feature", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(true)
+		cs.Properties.FeatureFlags = &FeatureFlags{EnableIPv6DualStack: true}
+		masterProfile := cs.Properties.MasterProfile
+		masterProfile.Distro = CoreOS
+		expectedMsg := fmt.Sprintf("Dual stack feature is currently supported only with Ubuntu, but master is of distro type %s", masterProfile.Distro)
+		if err := cs.Properties.validateMasterProfile(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+
+		masterProfile.Distro = Ubuntu
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].OSType = Windows
+		expectedMsg = fmt.Sprintf("Dual stack feature is supported only with Linux, but agent pool '%s' is of os type %s", agentPoolProfiles[0].Name, agentPoolProfiles[0].OSType)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+
+		agentPoolProfiles[0].OSType = Linux
+		agentPoolProfiles[0].Distro = CoreOS
+		expectedMsg = fmt.Sprintf("Dual stack feature is currently supported only with Ubuntu, but agent pool '%s' is of distro type %s", agentPoolProfiles[0].Name, agentPoolProfiles[0].Distro)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
 }
 
 func TestValidateProperties_CustomNodeLabels(t *testing.T) {
@@ -2312,245 +2783,353 @@ func TestAgentPoolProfile_ValidateAvailabilityProfile(t *testing.T) {
 			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
 		}
 	})
+
+	t.Run("Should fail for AvailabilitySet + SinglePlacementGroup true", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].SinglePlacementGroup = to.BoolPtr(true)
+		expectedMsg := fmt.Sprintf("singlePlacementGroup is only supported with VirtualMachineScaleSets")
+		if err := cs.Properties.validateAgentPoolProfiles(true); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for AvailabilitySet + SinglePlacementGroup false", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].SinglePlacementGroup = to.BoolPtr(false)
+		expectedMsg := fmt.Sprintf("singlePlacementGroup is only supported with VirtualMachineScaleSets")
+		if err := cs.Properties.validateAgentPoolProfiles(true); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for AvailabilitySet + invalid LoadBalancerBackendAddressPoolIDs", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = AvailabilitySet
+		agentPoolProfiles[0].LoadBalancerBackendAddressPoolIDs = []string{"/subscriptions/123/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/myVMSSSLB/backendAddressPools/myVMSSSLBBEPool", ""}
+		expectedMsg := fmt.Sprintf("AgentPoolProfile.LoadBalancerBackendAddressPoolIDs can not contain empty string. Agent pool name: %s", agentPoolProfiles[0].Name)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+}
+
+func TestAgentPoolProfile_ValidateVirtualMachineScaleSet(t *testing.T) {
+	t.Run("Should fail for invalid VMSS + Overprovisioning config", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = AvailabilitySet
+		agentPoolProfiles[0].VMSSOverProvisioningEnabled = to.BoolPtr(true)
+		expectedMsg := fmt.Sprintf("You have specified VMSS Overprovisioning in agent pool %s, but you did not specify VMSS", agentPoolProfiles[0].Name)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for invalid VMSS + Enable VMSS node public IP config", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = AvailabilitySet
+		agentPoolProfiles[0].EnableVMSSNodePublicIP = to.BoolPtr(true)
+		expectedMsg := fmt.Sprintf("You have enabled VMSS node public IP in agent pool %s, but you did not specify VMSS", agentPoolProfiles[0].Name)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for invalid VMSS + VnetSubnetID + FirstConsecutiveStaticIP config", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		cs.Properties.MasterProfile.AvailabilityProfile = VirtualMachineScaleSets
+		cs.Properties.MasterProfile.VnetSubnetID = "vnet"
+		cs.Properties.MasterProfile.FirstConsecutiveStaticIP = "10.10.10.240"
+		expectedMsg := fmt.Sprintf("when masterProfile's availabilityProfile is VirtualMachineScaleSets and a vnetSubnetID is specified, the firstConsecutiveStaticIP should be empty and will be determined by an offset from the first IP in the vnetCidr")
+		if err := cs.Properties.validateMasterProfile(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for VMSS master + AvailabilitySet agent pool", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		cs.Properties.MasterProfile.AvailabilityProfile = VirtualMachineScaleSets
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = AvailabilitySet
+		expectedMsg := fmt.Sprintf("VirtualMachineScaleSets for master profile must be used together with virtualMachineScaleSets for agent profiles. Set \"availabilityProfile\" to \"VirtualMachineScaleSets\" for agent profiles")
+		if err := cs.Properties.validateMasterProfile(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for VMSS + StorageAccount", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = VirtualMachineScaleSets
+		agentPoolProfiles[0].StorageProfile = StorageAccount
+		expectedMsg := fmt.Sprintf("VirtualMachineScaleSets does not support %s disks.  Please specify \"storageProfile\": \"%s\" (recommended) or \"availabilityProfile\": \"%s\"", StorageAccount, ManagedDisks, AvailabilitySet)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for VMSS + VMAS", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		cs.Properties.AgentPoolProfiles = append(cs.Properties.AgentPoolProfiles, &AgentPoolProfile{
+			Name:                "agentpool2",
+			VMSize:              "Standard_D2_v2",
+			Count:               1,
+			AvailabilityProfile: AvailabilitySet,
+		})
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = VirtualMachineScaleSets
+		agentPoolProfiles[1].AvailabilityProfile = AvailabilitySet
+		expectedMsg := fmt.Sprintf("mixed mode availability profiles are not allowed. Please set either VirtualMachineScaleSets or AvailabilitySet in availabilityProfile for all agent pools")
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+
+	t.Run("Should fail for VMSS + invalid LoadBalancerBackendAddressPoolIDs", func(t *testing.T) {
+		t.Parallel()
+		cs := getK8sDefaultContainerService(false)
+		agentPoolProfiles := cs.Properties.AgentPoolProfiles
+		agentPoolProfiles[0].AvailabilityProfile = VirtualMachineScaleSets
+		agentPoolProfiles[0].LoadBalancerBackendAddressPoolIDs = []string{"/subscriptions/123/resourceGroups/rg/providers/Microsoft.Network/loadBalancers/myVMSSSLB/backendAddressPools/myVMSSSLBBEPool", ""}
+		expectedMsg := fmt.Sprintf("AgentPoolProfile.LoadBalancerBackendAddressPoolIDs can not contain empty string. Agent pool name: %s", agentPoolProfiles[0].Name)
+		if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+			t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+		}
+	})
+}
+
+func TestAgentPoolProfile_ValidateAuditDEnabled(t *testing.T) {
+	t.Run("Should have proper validation for auditd + distro combinations", func(t *testing.T) {
+		t.Parallel()
+		for _, distro := range DistroValues {
+			cs := getK8sDefaultContainerService(false)
+			agentPoolProfiles := cs.Properties.AgentPoolProfiles
+			agentPoolProfiles[0].Distro = distro
+			agentPoolProfiles[0].AuditDEnabled = to.BoolPtr(true)
+			switch distro {
+			case RHEL, CoreOS:
+				expectedMsg := fmt.Sprintf("You have enabled auditd in agent pool %s, but you did not specify an Ubuntu-based distro", agentPoolProfiles[0].Name)
+				if err := cs.Properties.validateAgentPoolProfiles(false); err.Error() != expectedMsg {
+					t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+				}
+			case Ubuntu, Ubuntu1804, AKSUbuntu1604, AKSUbuntu1804, ACC1604:
+				if err := cs.Properties.validateAgentPoolProfiles(false); err != nil {
+					t.Errorf("AuditDEnabled should work with distro %s, got error %s", distro, err.Error())
+				}
+			}
+		}
+	})
+}
+
+func TestMasterProfile_ValidateAuditDEnabled(t *testing.T) {
+	t.Run("Should have proper validation for auditd + distro combinations", func(t *testing.T) {
+		t.Parallel()
+		for _, distro := range DistroValues {
+			cs := getK8sDefaultContainerService(false)
+			masterProfile := cs.Properties.MasterProfile
+			masterProfile.Distro = distro
+			masterProfile.AuditDEnabled = to.BoolPtr(true)
+			switch distro {
+			case RHEL, CoreOS:
+				expectedMsg := fmt.Sprintf("You have enabled auditd for master vms, but you did not specify an Ubuntu-based distro.")
+				if err := cs.Properties.validateMasterProfile(false); err.Error() != expectedMsg {
+					t.Errorf("expected error with message : %s, but got %s", expectedMsg, err.Error())
+				}
+			case Ubuntu, Ubuntu1804, AKSUbuntu1604, AKSUbuntu1804, ACC1604:
+				if err := cs.Properties.validateMasterProfile(false); err != nil {
+					t.Errorf("AuditDEnabled should work with distro %s, got error %s", distro, err.Error())
+				}
+			}
+		}
+	})
 }
 
 func TestValidateCustomCloudProfile(t *testing.T) {
-
-	const (
-		name                         = "AzureStackCloud"
-		managementPortalURL          = "https://management.local.azurestack.external/"
-		publishSettingsURL           = "https://management.local.azurestack.external/publishsettings/index"
-		serviceManagementEndpoint    = "https://management.azurestackci15.onmicrosoft.com/36f71706-54df-4305-9847-5b038a4cf189"
-		resourceManagerEndpoint      = "https://management.local.azurestack.external/"
-		activeDirectoryEndpoint      = "https://login.windows.net/"
-		galleryEndpoint              = "https://portal.local.azurestack.external=30015/"
-		keyVaultEndpoint             = "https://vault.azurestack.external/"
-		graphEndpoint                = "https://graph.windows.net/"
-		serviceBusEndpoint           = "https://servicebus.azurestack.external/"
-		batchManagementEndpoint      = "https://batch.azurestack.external/"
-		storageEndpointSuffix        = "core.azurestack.external"
-		sqlDatabaseDNSSuffix         = "database.azurestack.external"
-		trafficManagerDNSSuffix      = "trafficmanager.cn"
-		keyVaultDNSSuffix            = "vault.azurestack.external"
-		serviceBusEndpointSuffix     = "servicebus.azurestack.external"
-		serviceManagementVMDNSSuffix = "chinacloudapp.cn"
-		resourceManagerVMDNSSuffix   = "cloudapp.azurestack.external"
-		containerRegistryDNSSuffix   = "azurecr.io"
-		tokenAudience                = "https://management.azurestack.external/"
-	)
-
 	tests := []struct {
-		name          string
-		customProfile *CustomCloudProfile
-		expectedErr   error
+		name        string
+		cs          *ContainerService
+		expectedErr error
 	}{
 		{
 			name: "valid run",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.testlocation.cotoso.com",
+					},
 				},
 			},
 			expectedErr: nil,
 		},
 		{
-			name:          "custom profile is nil",
-			customProfile: nil,
-			expectedErr:   nil,
-		},
-		{
-			name: "environment is nil",
-			customProfile: &CustomCloudProfile{
-				Environment: nil,
-			},
-			expectedErr: errors.New("environment needs to be specified when CustomCloudProfile is provided"),
-		},
-		{
-			name: "name is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         "",
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "custom profile is nil",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					LinuxProfile: &LinuxProfile{
+						AdminUsername: "abc",
+					},
 				},
 			},
-			expectedErr: errors.New("name needs to be specified when Environment is provided"),
+			expectedErr: nil,
 		},
 		{
-			name: "ServiceManagementEndpoint is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    "",
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "PortalURL is empty",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						AuthenticationMethod: "azure_ad",
+					},
 				},
 			},
-			expectedErr: errors.New("serviceManagementEndpoint needs to be specified when Environment is provided"),
+			expectedErr: errors.New("portalURL needs to be specified when CustomCloudProfile is provided"),
 		},
 		{
-			name: "ResourceManagerEndpoint is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      "",
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "PortalURL is invalid",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.testlocationinvalid.cotoso.com",
+					},
 				},
 			},
-			expectedErr: errors.New("resourceManagerEndpoint needs to be specified when Environment is provided"),
+			expectedErr: fmt.Errorf("portalURL needs to start with https://portal.%s. ", "testlocation"),
+		},
+
+		{
+			name: "authenticationMethod has invalid value",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						AuthenticationMethod: "invalidAuthMethod",
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: errors.Errorf("authenticationMethod allowed values are '%s' and '%s'", ClientCertificateAuthMethod, ClientSecretAuthMethod),
 		},
 		{
-			name: "activeDirectoryEndpoint is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      "",
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "identitySystem has invalid value",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						IdentitySystem: "invalidIdentySytem",
+						PortalURL:      "https://portal.testlocation.cotoso.com",
+					},
 				},
 			},
-			expectedErr: errors.New("activeDirectoryEndpoint needs to be specified when Environment is provided"),
+			expectedErr: errors.Errorf("identitySystem allowed values are '%s' and '%s'", AzureADIdentitySystem, ADFSIdentitySystem),
 		},
 		{
-			name: "graphEndpoint is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                "",
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "Dependencies location: china",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						DependenciesLocation: DependenciesLocation("china"),
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
 				},
 			},
-			expectedErr: errors.New("graphEndpoint needs to be specified when Environment is provided"),
+			expectedErr: nil,
 		},
 		{
-			name: "resourceManagerVMDNSSuffix is empty",
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   "",
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			name: "Dependencies location: public",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						DependenciesLocation: DependenciesLocation("public"),
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
 				},
 			},
-			expectedErr: errors.New("resourceManagerVMDNSSuffix needs to be specified when Environment is provided"),
+			expectedErr: nil,
+		},
+		{
+			name: "Dependencies location: german",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						DependenciesLocation: DependenciesLocation("german"),
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "Dependencies location: usgovernment",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						DependenciesLocation: DependenciesLocation("usgovernment"),
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: nil,
+		},
+		{
+			name: "Dependencies location: invalid",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						DependenciesLocation: DependenciesLocation("invalidDependenciesLocation"),
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: errors.New("The invalidDependenciesLocation dependenciesLocation is not supported. The supported vaules are [ public china german usgovernment]"),
+		},
+		{
+			name: " valid AzureAD and ClientSecret",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						IdentitySystem:       "azure_ad",
+						AuthenticationMethod: "client_secret",
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: nil,
+		},
+		{
+			name: " valid ADFS and ClientCertificate",
+			cs: &ContainerService{
+				Location: "testlocation",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						IdentitySystem:       "adfs",
+						AuthenticationMethod: "client_certificate",
+						PortalURL:            "https://portal.testlocation.cotoso.com",
+					},
+				},
+			},
+			expectedErr: nil,
 		},
 	}
 
@@ -2558,9 +3137,7 @@ func TestValidateCustomCloudProfile(t *testing.T) {
 		test := test
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			cs := getK8sDefaultContainerService(true)
-			cs.Properties.CustomCloudProfile = test.customProfile
-			gotErr := cs.Properties.validateCustomCloudProfile()
+			gotErr := test.cs.validateCustomCloudProfile()
 			if !helpers.EqualError(gotErr, test.expectedErr) {
 				t.Logf("scenario %q", test.name)
 				t.Errorf("expected error: %v, got: %v", test.expectedErr, gotErr)
@@ -2571,146 +3148,141 @@ func TestValidateCustomCloudProfile(t *testing.T) {
 
 func TestValidateLocation(t *testing.T) {
 
-	const (
-		name                         = "AzureStackCloud"
-		managementPortalURL          = "https://management.local.azurestack.external/"
-		publishSettingsURL           = "https://management.local.azurestack.external/publishsettings/index"
-		serviceManagementEndpoint    = "https://management.azurestackci15.onmicrosoft.com/36f71706-54df-4305-9847-5b038a4cf189"
-		resourceManagerEndpoint      = "https://management.local.azurestack.external/"
-		activeDirectoryEndpoint      = "https://login.windows.net/"
-		galleryEndpoint              = "https://portal.local.azurestack.external=30015/"
-		keyVaultEndpoint             = "https://vault.azurestack.external/"
-		graphEndpoint                = "https://graph.windows.net/"
-		serviceBusEndpoint           = "https://servicebus.azurestack.external/"
-		batchManagementEndpoint      = "https://batch.azurestack.external/"
-		storageEndpointSuffix        = "core.azurestack.external"
-		sqlDatabaseDNSSuffix         = "database.azurestack.external"
-		trafficManagerDNSSuffix      = "trafficmanager.cn"
-		keyVaultDNSSuffix            = "vault.azurestack.external"
-		serviceBusEndpointSuffix     = "servicebus.azurestack.external"
-		serviceManagementVMDNSSuffix = "chinacloudapp.cn"
-		resourceManagerVMDNSSuffix   = "cloudapp.azurestack.external"
-		containerRegistryDNSSuffix   = "azurecr.io"
-		tokenAudience                = "https://management.azurestack.external/"
-	)
-
 	tests := []struct {
 		name          string
 		location      string
 		propertiesnil bool
-		customProfile *CustomCloudProfile
+		cs            *ContainerService
 		expectedErr   error
 	}{
-		{
-			name:          "AzureStack location is customlocation",
-			location:      "customlocation",
-			propertiesnil: false,
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
-				},
-			},
-			expectedErr: nil,
-		},
-		{
-			name:          "AzureStack properties is nil",
-			location:      "customlocation",
-			propertiesnil: true,
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
-				},
-			},
-			expectedErr: errors.New("missing ContainerService Properties"),
-		},
-		{
-			name:          "Azure location is westus",
-			location:      "westus",
-			propertiesnil: false,
-			customProfile: nil,
-			expectedErr:   nil,
-		},
-		{
-			name:          "Azure location is empty",
-			location:      "",
-			propertiesnil: false,
-			customProfile: nil,
-			expectedErr:   nil,
-		},
-		{
-			name:          "Azure properties is nil",
-			location:      "westus",
-			propertiesnil: true,
-			customProfile: nil,
-			expectedErr:   errors.New("missing ContainerService Properties"),
-		},
+
 		{
 			name:          "AzureStack location is empty",
 			location:      "",
 			propertiesnil: false,
-			customProfile: &CustomCloudProfile{
-				Environment: &azure.Environment{
-					Name:                         name,
-					ManagementPortalURL:          managementPortalURL,
-					PublishSettingsURL:           publishSettingsURL,
-					ServiceManagementEndpoint:    serviceManagementEndpoint,
-					ResourceManagerEndpoint:      resourceManagerEndpoint,
-					ActiveDirectoryEndpoint:      activeDirectoryEndpoint,
-					GalleryEndpoint:              galleryEndpoint,
-					KeyVaultEndpoint:             keyVaultEndpoint,
-					GraphEndpoint:                graphEndpoint,
-					ServiceBusEndpoint:           serviceBusEndpoint,
-					BatchManagementEndpoint:      batchManagementEndpoint,
-					StorageEndpointSuffix:        storageEndpointSuffix,
-					SQLDatabaseDNSSuffix:         sqlDatabaseDNSSuffix,
-					TrafficManagerDNSSuffix:      trafficManagerDNSSuffix,
-					KeyVaultDNSSuffix:            keyVaultDNSSuffix,
-					ServiceBusEndpointSuffix:     serviceBusEndpointSuffix,
-					ServiceManagementVMDNSSuffix: serviceManagementVMDNSSuffix,
-					ResourceManagerVMDNSSuffix:   resourceManagerVMDNSSuffix,
-					ContainerRegistryDNSSuffix:   containerRegistryDNSSuffix,
-					TokenAudience:                tokenAudience,
+			cs: &ContainerService{
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.testlocation.cotoso.com",
+					},
 				},
 			},
 			expectedErr: errors.New("missing ContainerService Location"),
+		},
+		{
+			name:          "AzureStack UseInstanceMetadata is true",
+			location:      "local",
+			propertiesnil: false,
+			cs: &ContainerService{
+				Location: "local",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.local.cotoso.com",
+					},
+					OrchestratorProfile: &OrchestratorProfile{
+						OrchestratorType:    Kubernetes,
+						OrchestratorVersion: "1.11.10",
+						KubernetesConfig: &KubernetesConfig{
+							UseInstanceMetadata: to.BoolPtr(trueVal),
+						},
+					},
+				},
+			},
+			expectedErr: errors.New("useInstanceMetadata shouldn't be set to true as feature not yet supported on Azure Stack"),
+		},
+		{
+			name:          "AzureStack EtcdDiskSizeGB is 1024",
+			location:      "local",
+			propertiesnil: false,
+			cs: &ContainerService{
+				Location: "local",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.local.cotoso.com",
+					},
+					OrchestratorProfile: &OrchestratorProfile{
+						OrchestratorType:    Kubernetes,
+						OrchestratorVersion: "1.11.10",
+						KubernetesConfig: &KubernetesConfig{
+							EtcdDiskSizeGB: "1024",
+						},
+					},
+				},
+			},
+			expectedErr: errors.Errorf("EtcdDiskSizeGB max size supported on Azure Stack is %d", MaxAzureStackManagedDiskSize),
+		},
+		{
+			name:          "AzureStack EtcdDiskSizeGB is 1024",
+			location:      "local",
+			propertiesnil: false,
+			cs: &ContainerService{
+				Location: "local",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.local.cotoso.com",
+					},
+					OrchestratorProfile: &OrchestratorProfile{
+						OrchestratorType:    Kubernetes,
+						OrchestratorVersion: "1.11.10",
+						KubernetesConfig: &KubernetesConfig{
+							EtcdDiskSizeGB: "1024GB",
+						},
+					},
+				},
+			},
+			expectedErr: errors.New("could not convert EtcdDiskSizeGB to int"),
+		},
+		{
+			name:          "AzureStack AcceleratedNetworking is true",
+			location:      "local",
+			propertiesnil: false,
+			cs: &ContainerService{
+				Location: "local",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.local.cotoso.com",
+					},
+					OrchestratorProfile: &OrchestratorProfile{
+						OrchestratorType:    Kubernetes,
+						OrchestratorVersion: "1.11.10",
+					},
+					AgentPoolProfiles: []*AgentPoolProfile{
+						{
+							Name:                         "testpool",
+							Count:                        1,
+							VMSize:                       "Standard_D2_v2",
+							AcceleratedNetworkingEnabled: to.BoolPtr(trueVal),
+						},
+					},
+				},
+			},
+			expectedErr: errors.New("AcceleratedNetworkingEnabled or AcceleratedNetworkingEnabledWindows shouldn't be set to true as feature is not yet supported on Azure Stack"),
+		},
+		{
+			name:          "AzureStack AcceleratedNetworking is true",
+			location:      "local",
+			propertiesnil: false,
+			cs: &ContainerService{
+				Location: "local",
+				Properties: &Properties{
+					CustomCloudProfile: &CustomCloudProfile{
+						PortalURL: "https://portal.local.cotoso.com",
+					},
+					OrchestratorProfile: &OrchestratorProfile{
+						OrchestratorType:    Kubernetes,
+						OrchestratorVersion: "1.11.10",
+					},
+					AgentPoolProfiles: []*AgentPoolProfile{
+						{
+							Name:                                "testpool",
+							Count:                               1,
+							VMSize:                              "Standard_D2_v2",
+							AcceleratedNetworkingEnabledWindows: to.BoolPtr(trueVal),
+						},
+					},
+				},
+			},
+			expectedErr: errors.New("AcceleratedNetworkingEnabled or AcceleratedNetworkingEnabledWindows shouldn't be set to true as feature is not yet supported on Azure Stack"),
 		},
 	}
 
@@ -2719,8 +3291,21 @@ func TestValidateLocation(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			cs := getK8sDefaultContainerService(true)
-			cs.Location = test.location
-			cs.Properties.CustomCloudProfile = test.customProfile
+			cs.Location = test.cs.Location
+			if test.cs.Properties != nil {
+				if test.cs.Properties.CustomCloudProfile != nil {
+					cs.Properties.CustomCloudProfile = test.cs.Properties.CustomCloudProfile
+				}
+
+				if test.cs.Properties.OrchestratorProfile != nil {
+					cs.Properties.OrchestratorProfile = test.cs.Properties.OrchestratorProfile
+				}
+
+				if test.cs.Properties.AgentPoolProfiles != nil {
+					cs.Properties.AgentPoolProfiles = test.cs.Properties.AgentPoolProfiles
+				}
+			}
+
 			if test.propertiesnil {
 				cs.Properties = nil
 			}
@@ -2728,6 +3313,358 @@ func TestValidateLocation(t *testing.T) {
 			if !helpers.EqualError(gotErr, test.expectedErr) {
 				t.Logf("scenario %q", test.name)
 				t.Errorf("expected error: %v, got: %v", test.expectedErr, gotErr)
+			}
+		})
+	}
+}
+
+func TestValidateFeatureFlags(t *testing.T) {
+	tests := map[string]struct {
+		properties    *Properties
+		expectedError string
+	}{
+		"should error when enableTelemetry flag is enabled on non Azure Stack environments": {
+			properties: &Properties{
+				CustomCloudProfile: nil,
+				FeatureFlags: &FeatureFlags{
+					EnableTelemetry: true,
+				},
+			},
+			expectedError: "EnableTelemetry flag is only available for Azure Stack",
+		},
+	}
+
+	for testName, test := range tests {
+		test := test
+		t.Run(testName, func(t *testing.T) {
+			t.Parallel()
+			err := test.properties.validateFeatureFlags()
+
+			if test.expectedError == "" && err == nil {
+				return
+			}
+			if test.expectedError == "" && err != nil {
+				t.Errorf("%s expected no error but received: %s", testName, err.Error())
+				return
+			}
+			if test.expectedError != "" && err == nil {
+				t.Errorf("%s expected error: %s, but received no error", testName, test.expectedError)
+				return
+			}
+			if !strings.Contains(err.Error(), test.expectedError) {
+				t.Errorf("%s expected error: %s but received: %s", testName, test.expectedError, err.Error())
+			}
+		})
+	}
+}
+
+func TestValidateMasterProfileImageRef(t *testing.T) {
+	tests := map[string]struct {
+		properties    *Properties
+		isUpdate      bool
+		expectedError error
+	}{
+		"should error when masterProfile includes both an ImageRef and a Distro configuration": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					Distro: AKSUbuntu1604,
+					ImageRef: &ImageReference{
+						Name:           "name",
+						ResourceGroup:  "rg",
+						SubscriptionID: "sub-id",
+						Gallery:        "gallery",
+						Version:        "version",
+					},
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      false,
+			expectedError: errors.New("masterProfile includes a custom image configuration (imageRef) and an explicit distro configuration, you may use one of these but not both simultaneously"),
+		},
+		"should error when masterProfile includes both an ImageRef and a Distro configuration in update context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					Distro: AKSUbuntu1604,
+					ImageRef: &ImageReference{
+						Name:           "name",
+						ResourceGroup:  "rg",
+						SubscriptionID: "sub-id",
+						Gallery:        "gallery",
+						Version:        "version",
+					},
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      true,
+			expectedError: errors.New("masterProfile includes a custom image configuration (imageRef) and an explicit distro configuration, you may use one of these but not both simultaneously"),
+		},
+		"should not error when masterProfile includes an ImageRef configuration only": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					ImageRef: &ImageReference{
+						Name:           "name",
+						ResourceGroup:  "rg",
+						SubscriptionID: "sub-id",
+						Gallery:        "gallery",
+						Version:        "version",
+					},
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when masterProfile includes an ImageRef configuration only in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					ImageRef: &ImageReference{
+						Name:           "name",
+						ResourceGroup:  "rg",
+						SubscriptionID: "sub-id",
+						Gallery:        "gallery",
+						Version:        "version",
+					},
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+		"should not error when masterProfile includes a Distro configuration only": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					Distro:    AKSUbuntu1604,
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when masterProfile includes a Distro configuration only in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					Distro:    AKSUbuntu1604,
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+		"should not error when masterProfile includes neither an explicit Distro nor ImageRef configuration": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when masterProfile includes neither an explicit Distro nor ImageRef configuration in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				MasterProfile: &MasterProfile{
+					DNSPrefix: "foo",
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+	}
+
+	for testName, test := range tests {
+		test := test
+		t.Run(testName, func(t *testing.T) {
+			t.Parallel()
+			err := test.properties.validateMasterProfile(test.isUpdate)
+			if !helpers.EqualError(err, test.expectedError) {
+				t.Errorf("expected error: %v, got: %v", test.expectedError, err)
+			}
+		})
+	}
+}
+
+func TestValidateAgentPoolProfilesImageRef(t *testing.T) {
+	tests := map[string]struct {
+		properties    *Properties
+		isUpdate      bool
+		expectedError error
+	}{
+		"should error when AgentPoolProfile includes both an ImageRef and a Distro configuration": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name:   "foo",
+						Distro: AKSUbuntu1604,
+						ImageRef: &ImageReference{
+							Name:           "name",
+							ResourceGroup:  "rg",
+							SubscriptionID: "sub-id",
+							Gallery:        "gallery",
+							Version:        "version",
+						},
+					},
+				},
+			},
+			isUpdate:      false,
+			expectedError: errors.Errorf("agentPoolProfile %s includes a custom image configuration (imageRef) and an explicit distro configuration, you may use one of these but not both simultaneously", "foo"),
+		},
+		"should error when AgentPoolProfile includes both an ImageRef and a Distro configuration in update context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name:   "foo",
+						Distro: AKSUbuntu1604,
+						ImageRef: &ImageReference{
+							Name:           "name",
+							ResourceGroup:  "rg",
+							SubscriptionID: "sub-id",
+							Gallery:        "gallery",
+							Version:        "version",
+						},
+					},
+				},
+			},
+			isUpdate:      true,
+			expectedError: errors.Errorf("agentPoolProfile %s includes a custom image configuration (imageRef) and an explicit distro configuration, you may use one of these but not both simultaneously", "foo"),
+		},
+		"should not error when AgentPoolProfile includes an ImageRef configuration only": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name: "foo",
+						ImageRef: &ImageReference{
+							Name:           "name",
+							ResourceGroup:  "rg",
+							SubscriptionID: "sub-id",
+							Gallery:        "gallery",
+							Version:        "version",
+						},
+					},
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when AgentPoolProfile includes an ImageRef configuration only in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name: "foo",
+						ImageRef: &ImageReference{
+							Name:           "name",
+							ResourceGroup:  "rg",
+							SubscriptionID: "sub-id",
+							Gallery:        "gallery",
+							Version:        "version",
+						},
+					},
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+		"should not error when AgentPoolProfile includes a Distro configuration only": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name:   "foo",
+						Distro: AKSUbuntu1604,
+					},
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when AgentPoolProfile includes a Distro configuration only in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name:   "foo",
+						Distro: AKSUbuntu1604,
+					},
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+		"should not error when AgentPoolProfile includes neither an explicit Distro nor ImageRef configuration": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name: "foo",
+					},
+				},
+			},
+			isUpdate:      false,
+			expectedError: nil,
+		},
+		"should not error when AgentPoolProfile includes neither an explicit Distro nor ImageRef configuration in an upgrade context": {
+			properties: &Properties{
+				OrchestratorProfile: &OrchestratorProfile{
+					OrchestratorType: Kubernetes,
+				},
+				AgentPoolProfiles: []*AgentPoolProfile{
+					{
+						Name: "foo",
+					},
+				},
+			},
+			isUpdate:      true,
+			expectedError: nil,
+		},
+	}
+
+	for testName, test := range tests {
+		test := test
+		t.Run(testName, func(t *testing.T) {
+			t.Parallel()
+			err := test.properties.validateAgentPoolProfiles(test.isUpdate)
+			if !helpers.EqualError(err, test.expectedError) {
+				t.Errorf("expected error: %v, got: %v", test.expectedError, err)
 			}
 		})
 	}

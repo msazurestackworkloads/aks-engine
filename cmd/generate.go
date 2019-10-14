@@ -12,7 +12,9 @@ import (
 	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/engine"
 	"github.com/Azure/aks-engine/pkg/engine/transform"
+	"github.com/Azure/aks-engine/pkg/helpers"
 	"github.com/Azure/aks-engine/pkg/i18n"
+	"github.com/gofrs/uuid"
 	"github.com/leonelquinteros/gotext"
 	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
@@ -38,6 +40,11 @@ type generateCmd struct {
 	containerService *api.ContainerService
 	apiVersion       string
 	locale           *gotext.Locale
+
+	rawClientID string
+
+	ClientID     uuid.UUID
+	ClientSecret string
 }
 
 func newGenerateCmd() *cobra.Command {
@@ -49,30 +56,37 @@ func newGenerateCmd() *cobra.Command {
 		Long:  generateLongDescription,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := gc.validate(cmd, args); err != nil {
-				log.Fatalf(fmt.Sprintf("error validating generateCmd: %s", err.Error()))
+				return errors.Wrap(err, "validating generateCmd")
 			}
 
 			if err := gc.mergeAPIModel(); err != nil {
-				log.Fatalf(fmt.Sprintf("error merging API model in generateCmd: %s", err.Error()))
+				return errors.Wrap(err, "merging API model in generateCmd")
 			}
 
-			if err := gc.loadAPIModel(cmd, args); err != nil {
-				log.Fatalf(fmt.Sprintf("error loading API model in generateCmd: %s", err.Error()))
+			if err := gc.loadAPIModel(); err != nil {
+				return errors.Wrap(err, "loading API model in generateCmd")
 			}
-
+			if gc.apiVersion == "vlabs" {
+				if err := gc.validateAPIModelAsVLabs(); err != nil {
+					return errors.Wrap(err, "validating API model after populating values")
+				}
+			} else {
+				log.Warnf("API model validation is only available for \"apiVersion\": \"vlabs\", skipping validation...")
+			}
 			return gc.run()
 		},
 	}
 
 	f := generateCmd.Flags()
-	f.StringVarP(&gc.apimodelPath, "api-model", "m", "", "path to the apimodel file")
+	f.StringVarP(&gc.apimodelPath, "api-model", "m", "", "path to your cluster definition file")
 	f.StringVarP(&gc.outputDirectory, "output-directory", "o", "", "output directory (derived from FQDN if absent)")
 	f.StringVar(&gc.caCertificatePath, "ca-certificate-path", "", "path to the CA certificate to use for Kubernetes PKI assets")
 	f.StringVar(&gc.caPrivateKeyPath, "ca-private-key-path", "", "path to the CA private key to use for Kubernetes PKI assets")
 	f.StringArrayVar(&gc.set, "set", []string{}, "set values on the command line (can specify multiple or separate values with commas: key1=val1,key2=val2)")
 	f.BoolVar(&gc.noPrettyPrint, "no-pretty-print", false, "skip pretty printing the output")
 	f.BoolVar(&gc.parametersOnly, "parameters-only", false, "only output parameters files")
-
+	f.StringVar(&gc.rawClientID, "client-id", "", "client id")
+	f.StringVar(&gc.ClientSecret, "client-secret", "", "client secret")
 	return generateCmd
 }
 
@@ -100,6 +114,8 @@ func (gc *generateCmd) validate(cmd *cobra.Command, args []string) error {
 		return errors.Errorf("specified api model does not exist (%s)", gc.apimodelPath)
 	}
 
+	gc.ClientID, _ = uuid.FromString(gc.rawClientID)
+
 	return nil
 }
 
@@ -122,7 +138,7 @@ func (gc *generateCmd) mergeAPIModel() error {
 	return nil
 }
 
-func (gc *generateCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
+func (gc *generateCmd) loadAPIModel() error {
 	var caCertificateBytes []byte
 	var caKeyBytes []byte
 	var err error
@@ -132,7 +148,7 @@ func (gc *generateCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
 			Locale: gc.locale,
 		},
 	}
-	gc.containerService, gc.apiVersion, err = apiloader.LoadContainerServiceFromFile(gc.apimodelPath, true, false, nil)
+	gc.containerService, gc.apiVersion, err = apiloader.LoadContainerServiceFromFile(gc.apimodelPath, false, false, nil)
 	if err != nil {
 		return errors.Wrap(err, "error parsing the api model")
 	}
@@ -166,7 +182,30 @@ func (gc *generateCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
 		prop.CertificateProfile.CaPrivateKey = string(caKeyBytes)
 	}
 
+	if err = gc.autofillApimodel(); err != nil {
+		return err
+	}
 	return nil
+}
+
+func (gc *generateCmd) autofillApimodel() error {
+	// set the client id and client secret by command flags
+	k8sConfig := gc.containerService.Properties.OrchestratorProfile.KubernetesConfig
+	useManagedIdentity := k8sConfig != nil && k8sConfig.UseManagedIdentity
+	if !useManagedIdentity {
+		if (gc.containerService.Properties.ServicePrincipalProfile == nil || ((gc.containerService.Properties.ServicePrincipalProfile.ClientID == "" || gc.containerService.Properties.ServicePrincipalProfile.ClientID == "00000000-0000-0000-0000-000000000000") && gc.containerService.Properties.ServicePrincipalProfile.Secret == "")) && gc.ClientID.String() != "" && gc.ClientSecret != "" {
+			gc.containerService.Properties.ServicePrincipalProfile = &api.ServicePrincipalProfile{
+				ClientID: gc.ClientID.String(),
+				Secret:   gc.ClientSecret,
+			}
+		}
+	}
+	return nil
+}
+
+// validateAPIModelAsVLabs converts the ContainerService object to a vlabs ContainerService object and validates it
+func (gc *generateCmd) validateAPIModelAsVLabs() error {
+	return api.ConvertContainerServiceToVLabs(gc.containerService).Validate(false)
 }
 
 func (gc *generateCmd) run() error {
@@ -179,26 +218,33 @@ func (gc *generateCmd) run() error {
 	}
 	templateGenerator, err := engine.InitializeTemplateGenerator(ctx)
 	if err != nil {
-		log.Fatalf("failed to initialize template generator: %s", err.Error())
+		return errors.Wrap(err, "initializing template generator")
 	}
 
-	certsGenerated, err := gc.containerService.SetPropertiesDefaults(false, false)
+	certsGenerated, err := gc.containerService.SetPropertiesDefaults(api.PropertiesDefaultsParams{
+		IsScale:    false,
+		IsUpgrade:  false,
+		PkiKeySize: helpers.DefaultPkiKeySize,
+	})
 	if err != nil {
-		log.Fatalf("error in SetPropertiesDefaults template %s: %s", gc.apimodelPath, err.Error())
-		os.Exit(1)
+		return errors.Wrapf(err, "in SetPropertiesDefaults template %s", gc.apimodelPath)
 	}
-	template, parameters, err := templateGenerator.GenerateTemplate(gc.containerService, engine.DefaultGeneratorCode, BuildTag)
+
+	//TODO remove these debug statements when we're new template generation implementation is enabled!
+	//bts, _ := json.Marshal(gc.containerService)
+	//log.Info(string(bts))
+
+	template, parameters, err := templateGenerator.GenerateTemplateV2(gc.containerService, engine.DefaultGeneratorCode, BuildTag)
 	if err != nil {
-		log.Fatalf("error generating template %s: %s", gc.apimodelPath, err.Error())
-		os.Exit(1)
+		return errors.Wrapf(err, "generating template %s", gc.apimodelPath)
 	}
 
 	if !gc.noPrettyPrint {
 		if template, err = transform.PrettyPrintArmTemplate(template); err != nil {
-			log.Fatalf("error pretty printing template: %s \n", err.Error())
+			return errors.Wrap(err, "pretty-printing template")
 		}
 		if parameters, err = transform.BuildAzureParametersFile(parameters); err != nil {
-			log.Fatalf("error pretty printing template parameters: %s \n", err.Error())
+			return errors.Wrap(err, "pretty-printing template parameters")
 		}
 	}
 
@@ -208,7 +254,7 @@ func (gc *generateCmd) run() error {
 		},
 	}
 	if err = writer.WriteTLSArtifacts(gc.containerService, gc.apiVersion, template, parameters, gc.outputDirectory, certsGenerated, gc.parametersOnly); err != nil {
-		log.Fatalf("error writing artifacts: %s \n", err.Error())
+		return errors.Wrap(err, "writing artifacts")
 	}
 
 	return nil

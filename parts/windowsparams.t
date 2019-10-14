@@ -42,6 +42,20 @@
         "description": "Password for the Windows Swarm Agent Virtual Machines."
       }
     },
+    "agentWindowsImageName": {
+      "defaultValue": "",
+      "type": "string",
+      "metadata": {
+        "description": "Image name when specifying a Windows image reference."
+      }
+    },
+    "agentWindowsImageResourceGroup": {
+      "defaultValue": "",
+      "type": "string",
+      "metadata": {
+        "description": "Resource group when specifying a Windows image reference."
+      }
+    },
     "agentWindowsVersion": {
       "defaultValue": "latest",
       "metadata": {
@@ -78,7 +92,7 @@
       "type": "string"
     },
     "windowsDockerVersion": {
-      "defaultValue": "18.09.0",
+      "defaultValue": "18.09.2",
       "metadata": {
         "description": "The version of Docker to be installed on Windows Nodes"
       },

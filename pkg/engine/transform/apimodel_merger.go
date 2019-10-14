@@ -16,8 +16,7 @@ import (
 
 // APIModelValue represents a value in the APIModel JSON file
 type APIModelValue struct {
-	stringValue   string
-	intValue      int64
+	value         interface{}
 	arrayValue    bool
 	arrayIndex    int
 	arrayProperty string
@@ -31,17 +30,19 @@ func MapValues(m map[string]APIModelValue, setFlagValues []string) {
 	}
 
 	// regex to find array[index].property pattern in the key, like linuxProfile.ssh.publicKeys[0].keyData
-	re := regexp.MustCompile(`(.*?)\[(.*?)\]\.(.*?)$`)
+	re := regexp.MustCompile(`(.*?)\[(.*?)\](?:\.(.*?))?$`)
 
 	for _, setFlagValue := range setFlagValues {
 		kvpMap := parseKeyValuePairs(setFlagValue)
 		for key, keyValue := range kvpMap {
 			flagValue := APIModelValue{}
-			// try to parse the value as integer or fallback to string
+			// try to parse the value as integer, bool or fallback to string
 			if keyValueAsInteger, err := strconv.ParseInt(keyValue, 10, 64); err == nil {
-				flagValue.intValue = keyValueAsInteger
+				flagValue.value = keyValueAsInteger
+			} else if keyValueAsBool, err := strconv.ParseBool(keyValue); err == nil {
+				flagValue.value = keyValueAsBool
 			} else {
-				flagValue.stringValue = keyValue
+				flagValue.value = keyValue
 			}
 
 			// check if the key is an array property
@@ -85,19 +86,21 @@ func MergeValuesWithAPIModel(apiModelPath string, m map[string]APIModelValue) (s
 	for key, flagValue := range m {
 		// working on an array
 		if flagValue.arrayValue {
-			log.Debugln(fmt.Sprintf("--set flag array value detected. Name: %s, Index: %b, PropertyName: %s", flagValue.arrayName, flagValue.arrayIndex, flagValue.arrayProperty))
-			arrayValue := jsonObj.Path(fmt.Sprint("properties.", flagValue.arrayName))
-			if flagValue.stringValue != "" {
-				arrayValue.Index(flagValue.arrayIndex).SetP(flagValue.stringValue, flagValue.arrayProperty)
+			log.Debugln(fmt.Sprintf("--set flag array value detected. Name: %s, Index: %d, PropertyName: %s", flagValue.arrayName, flagValue.arrayIndex, flagValue.arrayProperty))
+			arrayPath := fmt.Sprint("properties.", flagValue.arrayName)
+			arrayValue := jsonObj.Path(arrayPath)
+			if flagValue.arrayProperty != "" {
+				arrayValue.Index(flagValue.arrayIndex).SetP(flagValue.value, flagValue.arrayProperty)
 			} else {
-				arrayValue.Index(flagValue.arrayIndex).SetP(flagValue.intValue, flagValue.arrayProperty)
+				count, _ := arrayValue.ArrayCount()
+				for i := count; i <= flagValue.arrayIndex; i++ {
+					jsonObj.ArrayAppendP(nil, arrayPath)
+				}
+				arrayValue = jsonObj.Path(arrayPath)
+				arrayValue.SetIndex(flagValue.value, flagValue.arrayIndex)
 			}
 		} else {
-			if flagValue.stringValue != "" {
-				jsonObj.SetP(flagValue.stringValue, fmt.Sprint("properties.", key))
-			} else {
-				jsonObj.SetP(flagValue.intValue, fmt.Sprint("properties.", key))
-			}
+			jsonObj.SetP(flagValue.value, fmt.Sprint("properties.", key))
 		}
 	}
 

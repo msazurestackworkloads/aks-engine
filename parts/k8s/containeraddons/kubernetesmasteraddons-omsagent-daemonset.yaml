@@ -10,6 +10,7 @@ type: Opaque
 data:
   WSID: "{{ContainerConfig "workspaceGuid"}}"
   KEY: "{{ContainerConfig "workspaceKey"}}"
+  DOMAIN: "{{ContainerConfig "workspaceDomain"}}"
 ---
 apiVersion: v1
 kind: ServiceAccount
@@ -30,7 +31,9 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods", "events", "nodes", "namespaces", "services"]
-  verbs: ["list"]
+  verbs: ["list", "get", "watch"]
+- nonResourceURLs: ["/metrics"]
+  verbs: ["get"]
 ---
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
@@ -51,7 +54,7 @@ roleRef:
 kind: ConfigMap
 apiVersion: v1
 data:
-  kube.conf: |- 
+  kube.conf: |-
      # Fluentd config file for OMS Docker - cluster components (kubeAPI)
      #Kubernetes pod inventory
      <source>
@@ -60,6 +63,7 @@ data:
       run_interval 60s
       log_level debug
      </source>
+
      #Kubernetes events
      <source>
       type kubeevents
@@ -67,12 +71,14 @@ data:
       run_interval 60s
       log_level debug
       </source>
+
      #Kubernetes logs
      <source>
       type kubelogs
       tag oms.api.KubeLogs
       run_interval 60s
      </source>
+
      #Kubernetes services
      <source>
       type kubeservices
@@ -80,6 +86,7 @@ data:
       run_interval 60s
       log_level debug
      </source>
+
      #Kubernetes Nodes
      <source>
       type kubenodeinventory
@@ -87,6 +94,7 @@ data:
       run_interval 60s
       log_level debug
      </source>
+
      #Kubernetes perf
      <source>
       type kubeperf
@@ -94,6 +102,29 @@ data:
       run_interval 60s
       log_level debug
      </source>
+
+     #cadvisor perf- Windows nodes
+     <source>
+      type wincadvisorperf
+      tag oms.api.wincadvisorperf
+      run_interval 60s
+      log_level debug
+     </source>
+
+     <filter mdm.kubepodinventory** mdm.kubenodeinventory**>
+      type filter_inventory2mdm
+      custom_metrics_azure_regions eastus,southcentralus,westcentralus,westus2,southeastasia,northeurope,westEurope
+      log_level info
+     </filter>
+
+     # custom_metrics_mdm filter plugin for perf data from windows nodes
+     <filter mdm.cadvisorperf**>
+      type filter_cadvisor2mdm
+      custom_metrics_azure_regions eastus,southcentralus,westcentralus,westus2,southeastasia,northeurope,westEurope
+      metrics_to_collect cpuUsageNanoCores,memoryWorkingSetBytes
+      log_level info
+     </filter>
+
      <match oms.containerinsights.KubePodInventory**>
       type out_oms
       log_level debug
@@ -108,6 +139,7 @@ data:
       retry_wait 30s
       max_retry_wait 9m
      </match>
+
      <match oms.containerinsights.KubeEvents**>
       type out_oms
       log_level debug
@@ -122,6 +154,7 @@ data:
       retry_wait 30s
       max_retry_wait 9m
      </match>
+
      <match oms.api.KubeLogs**>
       type out_oms_api
       log_level debug
@@ -133,6 +166,7 @@ data:
       retry_limit 10
       retry_wait 30s
      </match>
+
      <match oms.containerinsights.KubeServices**>
       type out_oms
       log_level debug
@@ -147,6 +181,7 @@ data:
       retry_wait 30s
       max_retry_wait 9m
      </match>
+
      <match oms.containerinsights.KubeNodeInventory**>
       type out_oms
       log_level debug
@@ -161,7 +196,8 @@ data:
       retry_wait 30s
       max_retry_wait 9m
      </match>
-     <match oms.api.ContainerNodeInventory**>
+
+     <match oms.containerinsights.ContainerNodeInventory**>
       type out_oms_api
       log_level debug
       buffer_chunk_limit 20m
@@ -173,7 +209,8 @@ data:
       retry_wait 15s
       max_retry_wait 9m
      </match>
-     <match oms.api.KubePerf**>	
+
+     <match oms.api.KubePerf**>
       type out_oms
       log_level debug
       num_threads 5
@@ -186,6 +223,53 @@ data:
       retry_limit 10
       retry_wait 30s
       max_retry_wait 9m
+     </match>
+
+     <match mdm.kubepodinventory** mdm.kubenodeinventory** >
+      type out_mdm
+      log_level debug
+      num_threads 5
+      buffer_chunk_limit 20m
+      buffer_type file
+      buffer_path %STATE_DIR_WS%/out_mdm_*.buffer
+      buffer_queue_limit 20
+      buffer_queue_full_action drop_oldest_chunk
+      flush_interval 20s
+      retry_limit 10
+      retry_wait 30s
+      max_retry_wait 9m
+      retry_mdm_post_wait_minutes 60
+     </match>
+
+     <match oms.api.wincadvisorperf**>
+      type out_oms
+      log_level debug
+      num_threads 5
+      buffer_chunk_limit 20m
+      buffer_type file
+      buffer_path %STATE_DIR_WS%/out_oms_api_wincadvisorperf*.buffer
+      buffer_queue_limit 20
+      buffer_queue_full_action drop_oldest_chunk
+      flush_interval 20s
+      retry_limit 10
+      retry_wait 30s
+      max_retry_wait 9m
+     </match>
+
+     <match mdm.cadvisorperf**>
+      type out_mdm
+      log_level debug
+      num_threads 5
+      buffer_chunk_limit 20m
+      buffer_type file
+      buffer_path %STATE_DIR_WS%/out_mdm_cdvisorperf*.buffer
+      buffer_queue_limit 20
+      buffer_queue_full_action drop_oldest_chunk
+      flush_interval 20s
+      retry_limit 10
+      retry_wait 30s
+      max_retry_wait 9m
+      retry_mdm_post_wait_minutes 60
      </match>
 metadata:
   name: omsagent-rs-config
@@ -214,10 +298,12 @@ spec:
       annotations:
         agentVersion: {{ContainerConfig "omsAgentVersion"}}
         dockerProviderVersion: {{ContainerConfig "dockerProviderVersion"}}
+        schema-versions:  {{ContainerConfig "schema-versions"}}
       labels:
         component: oms-agent
         tier: node
     spec:
+      priorityClassName: system-node-critical
       serviceAccountName: omsagent
       containers:
         - name: omsagent
@@ -236,9 +322,9 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
             - name: ACS_RESOURCE_NAME
-              value: "aks-engine-cluster"
-            - name: DISABLE_KUBE_SYSTEM_LOG_COLLECTION
-              value: "true"
+              value: {{ContainerConfig "clusterName"}}
+            - name: CONTROLLER_TYPE
+              value: "DaemonSet"
             - name: ISTEST
               value: "true"
           livenessProbe:
@@ -246,7 +332,7 @@ spec:
               command:
                 - /bin/bash
                 - -c
-                - ps -ef | grep omsagent | grep -v \"grep\"
+                - /opt/livenessprobe.sh
             initialDelaySeconds: 60
             periodSeconds: 60
           ports:
@@ -257,15 +343,21 @@ spec:
           securityContext:
             privileged: true
           volumeMounts:
+            - mountPath: /hostfs
+              name: host-root
             - mountPath: /var/run/host
               name: docker-sock
             - mountPath: /var/log
               name: host-log
             - mountPath: /var/lib/docker/containers
               name: containerlog-path
+            - mountPath: /etc/kubernetes/host
+              name: azure-json-path
             - mountPath: /etc/omsagent-secret
               name: omsagent-secret
               readOnly: true
+            - mountPath: /etc/config/settings
+              name: settings-vol-config
       nodeSelector:
         beta.kubernetes.io/os: linux
       tolerations:
@@ -274,6 +366,9 @@ spec:
           operator: Equal
           value: "true"
       volumes:
+        - name: host-root
+          hostPath:
+            path: /
         - name: docker-sock
           hostPath:
             path: /var/run
@@ -286,9 +381,16 @@ spec:
         - name: containerlog-path
           hostPath:
             path: /var/lib/docker/containers
+        - name: azure-json-path
+          hostPath:
+            path: /etc/kubernetes
         - name: omsagent-secret
           secret:
             secretName: omsagent-secret
+        - name: settings-vol-config
+          configMap:
+            name: container-azm-ms-agentconfig
+            optional: true
   updateStrategy:
     type: RollingUpdate
 ---
@@ -316,10 +418,11 @@ spec:
       annotations:
         agentVersion: {{ContainerConfig "omsAgentVersion"}}
         dockerProviderVersion: {{ContainerConfig "dockerProviderVersion"}}
+        schema-versions:  {{ContainerConfig "schema-versions"}}
     spec:
       serviceAccountName: omsagent
       containers:
-        - name: omsagent 
+        - name: omsagent
           image: {{ContainerImage "omsagent"}}
           imagePullPolicy: IfNotPresent
           resources:
@@ -335,43 +438,47 @@ spec:
                 fieldRef:
                   fieldPath: status.hostIP
             - name: ACS_RESOURCE_NAME
-              value: "aks-engine-cluster"
-            - name: DISABLE_KUBE_SYSTEM_LOG_COLLECTION
-              value: "true"
+              value: {{ContainerConfig "clusterName"}}
+            - name: CONTROLLER_TYPE
+              value: "ReplicaSet"
             - name: ISTEST
               value: "true"
           securityContext:
             privileged: true
           ports:
             - containerPort: 25225
-              protocol: TCP 
+              protocol: TCP
             - containerPort: 25224
               protocol: UDP
           volumeMounts:
             - mountPath: /var/run/host
               name: docker-sock
-            - mountPath: /var/log 
+            - mountPath: /var/log
               name: host-log
-            - mountPath: /var/lib/docker/containers 
+            - mountPath: /var/lib/docker/containers
               name: containerlog-path
+            - mountPath: /etc/kubernetes/host
+              name: azure-json-path
             - mountPath: /etc/omsagent-secret
               name: omsagent-secret
               readOnly: true
             - mountPath : /etc/config
               name: omsagent-rs-config
+            - mountPath: /etc/config/settings
+              name: settings-vol-config
           livenessProbe:
             exec:
               command:
                 - /bin/bash
                 - -c
-                - ps -ef | grep omsagent | grep -v \"grep\"
+                - /opt/livenessprobe.sh
             initialDelaySeconds: 60
             periodSeconds: 60
       nodeSelector:
         beta.kubernetes.io/os: linux
         kubernetes.io/role: agent
       volumes:
-        - name: docker-sock 
+        - name: docker-sock
           hostPath:
             path: /var/run
         - name: container-hostname
@@ -383,9 +490,16 @@ spec:
         - name: containerlog-path
           hostPath:
             path: /var/lib/docker/containers
+        - name: azure-json-path
+          hostPath:
+            path: /etc/kubernetes
         - name: omsagent-secret
           secret:
             secretName: omsagent-secret
         - name: omsagent-rs-config
           configMap:
             name: omsagent-rs-config
+        - name: settings-vol-config
+          configMap:
+            name: container-azm-ms-agentconfig
+            optional: true

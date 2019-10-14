@@ -8,13 +8,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"math/rand"
+	"strings"
 	"time"
+
+	"github.com/pkg/errors"
 
 	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/armhelpers"
 	"github.com/Azure/aks-engine/pkg/armhelpers/utils"
 	"github.com/Azure/aks-engine/pkg/engine"
 	"github.com/Azure/aks-engine/pkg/engine/transform"
+	"github.com/Azure/aks-engine/pkg/helpers"
 	"github.com/Azure/aks-engine/pkg/i18n"
 	"github.com/Azure/aks-engine/pkg/operations"
 	"github.com/sirupsen/logrus"
@@ -26,17 +30,21 @@ type Upgrader struct {
 	Translator *i18n.Translator
 	logger     *logrus.Entry
 	ClusterTopology
-	Client           armhelpers.AKSEngineClient
-	kubeConfig       string
-	stepTimeout      *time.Duration
-	AKSEngineVersion string
+	Client             armhelpers.AKSEngineClient
+	kubeConfig         string
+	stepTimeout        *time.Duration
+	cordonDrainTimeout *time.Duration
+	AKSEngineVersion   string
 }
 
 type vmStatus int
 
 const (
-	defaultTimeout            = time.Minute * 20
-	vmStatusUpgraded vmStatus = iota
+	defaultTimeout                     = time.Minute * 20
+	defaultCordonDrainTimeout          = time.Minute * 20
+	nodePropertiesCopyTimeout          = time.Minute * 5
+	clusterUpgradeTimeout              = time.Minute * 180
+	vmStatusUpgraded          vmStatus = iota
 	vmStatusNotUpgraded
 	vmStatusIgnored
 )
@@ -47,19 +55,20 @@ type vmInfo struct {
 }
 
 // Init initializes an upgrader struct
-func (ku *Upgrader) Init(translator *i18n.Translator, logger *logrus.Entry, clusterTopology ClusterTopology, client armhelpers.AKSEngineClient, kubeConfig string, stepTimeout *time.Duration, aksEngineVersion string) {
+func (ku *Upgrader) Init(translator *i18n.Translator, logger *logrus.Entry, clusterTopology ClusterTopology, client armhelpers.AKSEngineClient, kubeConfig string, stepTimeout *time.Duration, cordonDrainTimeout *time.Duration, aksEngineVersion string) {
 	ku.Translator = translator
 	ku.logger = logger
 	ku.ClusterTopology = clusterTopology
 	ku.Client = client
 	ku.kubeConfig = kubeConfig
 	ku.stepTimeout = stepTimeout
+	ku.cordonDrainTimeout = cordonDrainTimeout
 	ku.AKSEngineVersion = aksEngineVersion
 }
 
 // RunUpgrade runs the upgrade pipeline
 func (ku *Upgrader) RunUpgrade() error {
-	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), clusterUpgradeTimeout)
 	defer cancel()
 	if err := ku.upgradeMasterNodes(ctx); err != nil {
 		return err
@@ -93,8 +102,14 @@ func (ku *Upgrader) upgradeMasterNodes(ctx context.Context) error {
 	transformer := &transform.Transformer{
 		Translator: ku.Translator,
 	}
-	if err := transformer.NormalizeResourcesForK8sMasterUpgrade(ku.logger, templateMap, ku.DataModel.Properties.MasterProfile.IsManagedDisks(), nil); err != nil {
-		ku.logger.Errorf(err.Error())
+	if ku.DataModel.Properties.OrchestratorProfile.KubernetesConfig.LoadBalancerSku == api.StandardLoadBalancerSku {
+		err = transformer.NormalizeForK8sSLBScalingOrUpgrade(ku.logger, templateMap)
+		if err != nil {
+			return ku.Translator.Errorf("error normalizing upgrade template for SLB: %s", err.Error())
+		}
+	}
+	if err = transformer.NormalizeResourcesForK8sMasterUpgrade(ku.logger, templateMap, ku.DataModel.Properties.MasterProfile.IsManagedDisks(), nil); err != nil {
+		ku.logger.Error(err.Error())
 		return err
 	}
 
@@ -144,7 +159,7 @@ func (ku *Upgrader) upgradeMasterNodes(ctx context.Context) error {
 
 		masterIndex, _ := utils.GetVMNameIndex(vm.StorageProfile.OsDisk.OsType, *vm.Name)
 
-		err := upgradeMasterNode.DeleteNode(vm.Name, false)
+		err = upgradeMasterNode.DeleteNode(vm.Name, false)
 		if err != nil {
 			ku.logger.Infof("Error deleting master VM: %s, err: %v", *vm.Name, err)
 			return err
@@ -223,7 +238,14 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 		if ku.DataModel.Properties.MasterProfile != nil {
 			isMasterManagedDisk = ku.DataModel.Properties.MasterProfile.IsManagedDisks()
 		}
-		if err := transformer.NormalizeResourcesForK8sAgentUpgrade(ku.logger, templateMap, isMasterManagedDisk, preservePools); err != nil {
+
+		if ku.DataModel.Properties.OrchestratorProfile.KubernetesConfig.LoadBalancerSku == api.StandardLoadBalancerSku {
+			err = transformer.NormalizeForK8sSLBScalingOrUpgrade(ku.logger, templateMap)
+			if err != nil {
+				return ku.Translator.Errorf("error normalizing upgrade template for SLB: %s", err.Error())
+			}
+		}
+		if err = transformer.NormalizeResourcesForK8sAgentUpgrade(ku.logger, templateMap, isMasterManagedDisk, preservePools); err != nil {
 			ku.logger.Errorf(err.Error())
 			return ku.Translator.Errorf("Error generating upgrade template: %s", err.Error())
 		}
@@ -259,6 +281,11 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 		} else {
 			upgradeAgentNode.timeout = *ku.stepTimeout
 		}
+		if ku.cordonDrainTimeout == nil {
+			upgradeAgentNode.cordonDrainTimeout = defaultCordonDrainTimeout
+		} else {
+			upgradeAgentNode.cordonDrainTimeout = *ku.cordonDrainTimeout
+		}
 
 		agentVMs := make(map[int]*vmInfo)
 		// Go over upgraded VMs and verify provisioning state
@@ -285,7 +312,7 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 
 			case "Failed":
 				ku.logger.Infof("Deleting agent VM %s in provisioning state %s", *vm.Name, vmProvisioningState)
-				err := upgradeAgentNode.DeleteNode(vm.Name, false)
+				err = upgradeAgentNode.DeleteNode(vm.Name, false)
 				if err != nil {
 					ku.logger.Errorf("Error deleting agent VM %s: %v", *vm.Name, err)
 					return err
@@ -313,10 +340,19 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 		if toBeUpgradedCount > 0 {
 			agentCount++
 		}
+
+		newCreatedVMs := []string{}
+		client, err := ku.getKubernetesClient(10 * time.Second)
+		if err != nil {
+			ku.logger.Errorf("Error getting Kubernetes client: %v", err)
+			return err
+		}
+
 		for upgradedCount+toBeUpgradedCount < agentCount {
 			agentIndex := getAvailableIndex(agentVMs)
 
-			vmName, err := utils.GetK8sVMName(ku.DataModel.Properties, agentPoolProfile, agentIndex)
+			var vmName string
+			vmName, err = utils.GetK8sVMName(ku.DataModel.Properties, agentPoolProfile, agentIndex)
 			if err != nil {
 				ku.logger.Errorf("Error reconstructing agent VM name with index %d: %v", agentIndex, err)
 				return err
@@ -335,13 +371,14 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 				return err
 			}
 
+			newCreatedVMs = append(newCreatedVMs, vmName)
 			agentVMs[agentIndex] = &vmInfo{vmName, vmStatusUpgraded}
 			upgradedCount++
 		}
 
 		if toBeUpgradedCount == 0 {
 			ku.logger.Infof("No nodes to upgrade")
-			return nil
+			continue
 		}
 
 		// Upgrade nodes in agent pool
@@ -351,6 +388,24 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 				continue
 			}
 			ku.logger.Infof("Upgrading Agent VM: %s, pool name: %s", vm.name, *agentPool.Name)
+
+			// copy custom properties from old node to new node if the PreserveNodesProperties in AgentPoolProfile is not set to false explicitly.
+			preserveNodesProperties := api.DefaultPreserveNodesProperties
+			if agentPoolProfile != nil && agentPoolProfile.PreserveNodesProperties != nil {
+				preserveNodesProperties = *agentPoolProfile.PreserveNodesProperties
+			}
+
+			if preserveNodesProperties {
+				if len(newCreatedVMs) > 0 {
+					newNodeName := newCreatedVMs[0]
+					newCreatedVMs = newCreatedVMs[1:]
+					ku.logger.Infof("Copying custom annotations, labels, taints from old node %s to new node %s...", vm.name, newNodeName)
+					err = ku.copyCustomPropertiesToNewNode(client, strings.ToLower(vm.name), newNodeName)
+					if err != nil {
+						ku.logger.Warningf("Failed to copy custom annotations, labels, taints from old node %s to new node %s: %v", vm.name, newNodeName, err)
+					}
+				}
+			}
 
 			err := upgradeAgentNode.DeleteNode(&vm.name, true)
 			if err != nil {
@@ -380,6 +435,7 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 					ku.logger.Errorf("Error validating upgraded agent VM %s: %v", vmName, err)
 					return err
 				}
+				newCreatedVMs = append(newCreatedVMs, vmName)
 				vm.status = vmStatusUpgraded
 			}
 			upgradedCount++
@@ -390,6 +446,11 @@ func (ku *Upgrader) upgradeAgentPools(ctx context.Context) error {
 }
 
 func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
+	agentPoolMap := make(map[string]*api.AgentPoolProfile)
+	for _, app := range ku.ClusterTopology.DataModel.Properties.AgentPoolProfiles {
+		agentPoolMap[app.Name] = app
+	}
+
 	if len(ku.ClusterTopology.AgentPoolScaleSetsToUpgrade) > 0 {
 		// need to apply the ARM template with target Kubernetes version to the VMSS first in order that the new VMSS instances
 		// created can get the expected Kubernetes version. Otherwise the new instances created still have old Kubernetes version
@@ -404,9 +465,16 @@ func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
 			Translator: ku.Translator,
 		}
 
-		if err := transformer.NormalizeForVMSSScaling(ku.logger, templateMap); err != nil {
-			ku.logger.Errorf("unable to update template, error: %v.", err)
+		if err = transformer.NormalizeMasterResourcesForScaling(ku.logger, templateMap); err != nil {
 			return err
+		}
+
+		if ku.DataModel.Properties.OrchestratorProfile.KubernetesConfig.LoadBalancerSku == api.StandardLoadBalancerSku {
+			ku.logger.Infof("upgradeAgentScaleSets SLB...")
+			err = transformer.NormalizeForK8sSLBScalingOrUpgrade(ku.logger, templateMap)
+			if err != nil {
+				return ku.Translator.Errorf("error normalizing upgrade template for SLB: %s", err.Error())
+			}
 		}
 
 		random := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -459,21 +527,15 @@ func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
 
 			ku.logger.Infof("Successfully set capacity for VMSS %s", vmssToUpgrade.Name)
 
-			// Before we can delete the node we should safely and responsibly drain it
-			var kubeAPIServerURL string
-			getClientTimeout := 10 * time.Second
-
-			if ku.DataModel.Properties.HostedMasterProfile != nil {
-				kubeAPIServerURL = ku.DataModel.Properties.HostedMasterProfile.FQDN
+			var cordonDrainTimeout time.Duration
+			if ku.cordonDrainTimeout == nil {
+				cordonDrainTimeout = defaultCordonDrainTimeout
 			} else {
-				kubeAPIServerURL = ku.DataModel.Properties.MasterProfile.FQDN
+				cordonDrainTimeout = *ku.cordonDrainTimeout
 			}
-			client, err := ku.Client.GetKubernetesClient(
-				kubeAPIServerURL,
-				ku.kubeConfig,
-				interval,
-				getClientTimeout,
-			)
+
+			// Before we can delete the node we should safely and responsibly drain it
+			client, err := ku.getKubernetesClient(cordonDrainTimeout)
 			if err != nil {
 				ku.logger.Errorf("Error getting Kubernetes client: %v", err)
 				return err
@@ -484,11 +546,11 @@ func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
 				client,
 				ku.logger,
 				vmToUpgrade.Name,
-				time.Minute,
+				cordonDrainTimeout,
 			)
 			if err != nil {
 				ku.logger.Errorf("Error draining VM in VMSS: %v", err)
-				return err
+				// Continue even if there's an error in draining the node.
 			}
 
 			ku.logger.Infof(
@@ -496,6 +558,33 @@ func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
 				vmToUpgrade.Name,
 				vmssToUpgrade.Name,
 			)
+
+			// copy custom properties from old node to new node if the PreserveNodesProperties in AgentPoolProfile is not set to false explicitly.
+			preserveNodesProperties := api.DefaultPreserveNodesProperties
+			var poolName string
+			if vmssToUpgrade.IsWindows {
+				poolName, _ = utils.WindowsVmssNameParts(vmssToUpgrade.Name)
+			} else {
+				poolName, _, _ = utils.VmssNameParts(vmssToUpgrade.Name)
+			}
+			if agentPool, ok := agentPoolMap[poolName]; ok {
+				if agentPool != nil && agentPool.PreserveNodesProperties != nil {
+					preserveNodesProperties = *agentPool.PreserveNodesProperties
+				}
+			}
+
+			if preserveNodesProperties {
+				newNodeName, err := ku.getLastVMNameInVMSS(ctx, ku.ClusterTopology.ResourceGroup, vmssToUpgrade.Name)
+				if err != nil {
+					return err
+				}
+
+				ku.logger.Infof("Copying custom annotations, labels, taints from old node %s to new node %s...", vmToUpgrade.Name, newNodeName)
+				err = ku.copyCustomPropertiesToNewNode(client, strings.ToLower(vmToUpgrade.Name), strings.ToLower(newNodeName))
+				if err != nil {
+					ku.logger.Warningf("Failed to copy custom annotations, labels, taints from old node %s to new node %s: %v", vmToUpgrade.Name, newNodeName, err)
+				}
+			}
 
 			// At this point we have our buffer node that will replace the node to delete
 			// so we can just remove this current node then
@@ -511,7 +600,6 @@ func (ku *Upgrader) upgradeAgentScaleSets(ctx context.Context) error {
 					vmssToUpgrade.Name)
 				return err
 			}
-
 			ku.logger.Infof(
 				"Successfully deleted VM %s in VMSS %s",
 				vmToUpgrade.Name,
@@ -535,7 +623,11 @@ func (ku *Upgrader) generateUpgradeTemplate(upgradeContainerService *api.Contain
 		return nil, nil, ku.Translator.Errorf("failed to initialize template generator: %s", err.Error())
 	}
 
-	_, err = upgradeContainerService.SetPropertiesDefaults(true, false)
+	_, err = upgradeContainerService.SetPropertiesDefaults(api.PropertiesDefaultsParams{
+		IsScale:    false,
+		IsUpgrade:  true,
+		PkiKeySize: helpers.DefaultPkiKeySize,
+	})
 	if err != nil {
 		return nil, nil, ku.Translator.Errorf("error in SetPropertiesDefaults: %s", err.Error())
 
@@ -543,18 +635,164 @@ func (ku *Upgrader) generateUpgradeTemplate(upgradeContainerService *api.Contain
 
 	var templateJSON string
 	var parametersJSON string
-	if templateJSON, parametersJSON, err = templateGenerator.GenerateTemplate(upgradeContainerService, engine.DefaultGeneratorCode, aksEngineVersion); err != nil {
+	if templateJSON, parametersJSON, err = templateGenerator.GenerateTemplateV2(upgradeContainerService, engine.DefaultGeneratorCode, aksEngineVersion); err != nil {
 		return nil, nil, ku.Translator.Errorf("error generating upgrade template: %s", err.Error())
 	}
 
 	var template interface{}
 	var parameters interface{}
-	json.Unmarshal([]byte(templateJSON), &template)
-	json.Unmarshal([]byte(parametersJSON), &parameters)
+
+	err = json.Unmarshal([]byte(templateJSON), &template)
+	if err != nil {
+		return nil, nil, ku.Translator.Errorf("error while unmarshaling the ARM template JSON: %s", err.Error())
+	}
+
+	err = json.Unmarshal([]byte(parametersJSON), &parameters)
+	if err != nil {
+		return nil, nil, ku.Translator.Errorf("error while unmarshaling the ARM parameters JSON: %s", err.Error())
+	}
+
 	templateMap := template.(map[string]interface{})
 	parametersMap := parameters.(map[string]interface{})
 
 	return templateMap, parametersMap, nil
+}
+
+func (ku *Upgrader) getLastVMNameInVMSS(ctx context.Context, resourceGroup string, vmScaleSetName string) (string, error) {
+	lastVMName := ""
+	for vmScaleSetVMsPage, err := ku.Client.ListVirtualMachineScaleSetVMs(ctx, resourceGroup, vmScaleSetName); vmScaleSetVMsPage.NotDone(); err = vmScaleSetVMsPage.Next() {
+		if err != nil {
+			return "", err
+		}
+
+		vms := vmScaleSetVMsPage.Values()
+		if len(vms) > 0 {
+			vm := vms[len(vms)-1]
+			lastVMName = *vm.VirtualMachineScaleSetVMProperties.OsProfile.ComputerName
+		}
+	}
+
+	if lastVMName == "" {
+		return "", errors.Errorf("failed to get the last VM name in Scale Set %s", vmScaleSetName)
+	}
+
+	return lastVMName, nil
+}
+
+func (ku *Upgrader) copyCustomPropertiesToNewNode(client armhelpers.KubernetesClient, oldNodeName string, newNodeName string) error {
+	// The new node is created without any taints, Kubernetes might schedule some pods on this newly created node before the taints/annotations/labels
+	// are copied over from corresponding old node. So drain the new node first before copying over the node properties.
+	// Note: SafelyDrainNodeWithClient() sets the Unschedulable of the node to true, set Unschedulable to false in copyCustomNodeProperties
+	var cordonDrainTimeout time.Duration
+	if ku.cordonDrainTimeout == nil {
+		cordonDrainTimeout = defaultCordonDrainTimeout
+	} else {
+		cordonDrainTimeout = *ku.cordonDrainTimeout
+	}
+	err := operations.SafelyDrainNodeWithClient(client, ku.logger, newNodeName, cordonDrainTimeout)
+	if err != nil {
+		ku.logger.Warningf("Error draining agent VM %s. Proceeding with copying node properties. Error: %v", newNodeName, err)
+	}
+
+	ch := make(chan struct{}, 1)
+	go func() {
+		for {
+			oldNode, err := client.GetNode(oldNodeName)
+			if err != nil {
+				ku.logger.Debugf("Failed to get properties of the old node %s: %v", oldNodeName, err)
+				time.Sleep(time.Second * 5)
+				continue
+			}
+
+			newNode, err := client.GetNode(newNodeName)
+			if err != nil {
+				ku.logger.Debugf("Failed to get properties of the new node %s: %v", newNodeName, err)
+				time.Sleep(time.Second * 5)
+				continue
+			}
+
+			err = ku.copyCustomNodeProperties(client, oldNodeName, oldNode, newNodeName, newNode)
+			if err != nil {
+				ku.logger.Debugf("Failed to copy custom annotations, labels, taints from old node %s to new node %s: %v", oldNodeName, newNodeName, err)
+				time.Sleep(time.Second * 5)
+			} else {
+				ch <- struct{}{}
+			}
+		}
+	}()
+
+	for {
+		select {
+		case <-ch:
+			ku.logger.Infof("Successfully copied custom annotations, labels, taints from old node %s to new node %s.", oldNodeName, newNodeName)
+			return nil
+		case <-time.After(nodePropertiesCopyTimeout):
+			err := fmt.Errorf("Copying custom annotations, labels, taints from old node %s to new node %s can't complete within %v", oldNodeName, newNodeName, nodePropertiesCopyTimeout)
+			ku.logger.Errorf(err.Error())
+			return err
+		}
+	}
+}
+
+func (ku *Upgrader) copyCustomNodeProperties(client armhelpers.KubernetesClient, oldNodeName string, oldNode *v1.Node, newNodeName string, newNode *v1.Node) error {
+	// copy additional custom annotations from old node to new node
+	if oldNode.Annotations != nil {
+		if newNode.Annotations == nil {
+			newNode.Annotations = map[string]string{}
+		}
+
+		for k, v := range oldNode.Annotations {
+			if _, ok := newNode.Annotations[k]; !ok {
+				newNode.Annotations[k] = strings.Replace(v, oldNodeName, newNodeName, -1)
+			}
+		}
+	}
+
+	// copy additional custom labels from old node to new node
+	if oldNode.Labels != nil {
+		if newNode.Labels == nil {
+			newNode.Labels = map[string]string{}
+		}
+
+		for k, v := range oldNode.Labels {
+			if _, ok := newNode.Labels[k]; !ok {
+				newNode.Labels[k] = strings.Replace(v, oldNodeName, newNodeName, -1)
+			}
+		}
+	}
+
+	// copy Taints from old node to new node
+	if oldNode.Spec.Taints != nil {
+		newNode.Spec.Taints = append([]v1.Taint{}, oldNode.Spec.Taints...)
+		for i := range newNode.Spec.Taints {
+			newNode.Spec.Taints[i].Value = strings.Replace(newNode.Spec.Taints[i].Value, oldNodeName, newNodeName, -1)
+		}
+	}
+
+	newNode, err := client.UpdateNode(newNode)
+	if err != nil {
+		ku.logger.Warningf("Failed to update the new node %s: %v", newNodeName, err)
+		return err
+	}
+
+	newNode.Spec.Unschedulable = false
+	_, err = client.UpdateNode(newNode)
+
+	return err
+}
+
+func (ku *Upgrader) getKubernetesClient(timeout time.Duration) (armhelpers.KubernetesClient, error) {
+	apiserverURL := ku.DataModel.Properties.GetMasterFQDN()
+	if ku.DataModel.Properties.HostedMasterProfile != nil {
+		apiServerListeningPort := 443
+		apiserverURL = fmt.Sprintf("https://%s:%d", apiserverURL, apiServerListeningPort)
+	}
+
+	return ku.Client.GetKubernetesClient(
+		apiserverURL,
+		ku.kubeConfig,
+		interval,
+		timeout)
 }
 
 // return unused index within the range of agent indices, or subsequent index

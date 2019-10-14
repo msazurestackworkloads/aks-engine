@@ -9,42 +9,44 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
 	"github.com/sirupsen/logrus"
 )
 
 const (
 	//Field names
-	customDataFieldName            = "customData"
-	dependsOnFieldName             = "dependsOn"
-	hardwareProfileFieldName       = "hardwareProfile"
-	imageReferenceFieldName        = "imageReference"
-	nameFieldName                  = "name"
-	osProfileFieldName             = "osProfile"
-	propertiesFieldName            = "properties"
-	resourcesFieldName             = "resources"
-	storageProfileFieldName        = "storageProfile"
-	typeFieldName                  = "type"
-	virtualMachineProfileFieldName = "virtualMachineProfile"
-	vmSizeFieldName                = "vmSize"
-	dataDisksFieldName             = "dataDisks"
-	createOptionFieldName          = "createOption"
-	tagsFieldName                  = "tags"
-	managedDiskFieldName           = "managedDisk"
+	customDataFieldName           = "customData"
+	dependsOnFieldName            = "dependsOn"
+	hardwareProfileFieldName      = "hardwareProfile"
+	imageReferenceFieldName       = "imageReference"
+	nameFieldName                 = "name"
+	osProfileFieldName            = "osProfile"
+	propertiesFieldName           = "properties"
+	resourcesFieldName            = "resources"
+	storageProfileFieldName       = "storageProfile"
+	typeFieldName                 = "type"
+	vmSizeFieldName               = "vmSize"
+	dataDisksFieldName            = "dataDisks"
+	createOptionFieldName         = "createOption"
+	tagsFieldName                 = "tags"
+	managedDiskFieldName          = "managedDisk"
+	windowsConfigurationFieldName = "windowsConfiguration"
 
 	// ARM resource Types
 	nsgResourceType  = "Microsoft.Network/networkSecurityGroups"
 	rtResourceType   = "Microsoft.Network/routeTables"
 	vmResourceType   = "Microsoft.Compute/virtualMachines"
-	vmssResourceType = "Microsoft.Compute/virtualMachineScaleSets"
 	vmExtensionType  = "Microsoft.Compute/virtualMachines/extensions"
 	nicResourceType  = "Microsoft.Network/networkInterfaces"
 	vnetResourceType = "Microsoft.Network/virtualNetworks"
+	vmasResourceType = "Microsoft.Compute/availabilitySets"
+	lbResourceType   = "Microsoft.Network/loadBalancers"
 
 	// resource ids
-	nsgID  = "nsgID"
-	rtID   = "routeTableID"
-	vnetID = "vnetID"
+	nsgID     = "nsgID"
+	rtID      = "routeTableID"
+	vnetID    = "vnetID"
+	agentLbID = "agentLbID"
 )
 
 // Translator defines all required interfaces for i18n.Translator.
@@ -64,41 +66,50 @@ type Transformer struct {
 	Translator Translator
 }
 
-// NormalizeForVMSSScaling takes a template and removes elements that are unwanted in a VMSS scale up/down case
-func (t *Transformer) NormalizeForVMSSScaling(logger *logrus.Entry, templateMap map[string]interface{}) error {
-	if err := t.NormalizeMasterResourcesForScaling(logger, templateMap); err != nil {
-		return err
-	}
-
+// NormalizeForK8sSLBScalingOrUpgrade takes a template and removes elements that are unwanted in a K8s Standard LB cluster scale up/down case
+func (t *Transformer) NormalizeForK8sSLBScalingOrUpgrade(logger *logrus.Entry, templateMap map[string]interface{}) error {
+	logger.Debugf("Running NormalizeForK8sSLBScalingOrUpgrade...")
+	lbIndex := -1
 	resources := templateMap[resourcesFieldName].([]interface{})
-	for _, resource := range resources {
+
+	for index, resource := range resources {
 		resourceMap, ok := resource.(map[string]interface{})
 		if !ok {
-			logger.Warnf("Template improperly formatted")
+			logger.Warnf("Template improperly formatted for resource")
 			continue
 		}
 
 		resourceType, ok := resourceMap[typeFieldName].(string)
-		if !ok || resourceType != vmssResourceType {
-			continue
-		}
+		resourceName := resourceMap[nameFieldName].(string)
 
-		resourceProperties, ok := resourceMap[propertiesFieldName].(map[string]interface{})
+		// remove agentLB if found
+		if ok && resourceType == lbResourceType && strings.Contains(resourceName, "variables('agentLbName')") {
+			lbIndex = index
+		}
+		// remove agentLB from dependsOn if found
+		dependencies, ok := resourceMap[dependsOnFieldName].([]interface{})
 		if !ok {
-			logger.Warnf("Template improperly formatted")
 			continue
 		}
 
-		virtualMachineProfile, ok := resourceProperties[virtualMachineProfileFieldName].(map[string]interface{})
-		if !ok {
-			logger.Warnf("Template improperly formatted")
-			continue
+		for dIndex := len(dependencies) - 1; dIndex >= 0; dIndex-- {
+			dependency := dependencies[dIndex].(string)
+			if strings.Contains(dependency, lbResourceType) || strings.Contains(dependency, agentLbID) {
+				dependencies = append(dependencies[:dIndex], dependencies[dIndex+1:]...)
+			}
 		}
 
-		if !t.removeCustomData(logger, virtualMachineProfile) || !t.removeImageReference(logger, virtualMachineProfile) {
-			continue
+		if len(dependencies) > 0 {
+			resourceMap[dependsOnFieldName] = dependencies
+		} else {
+			delete(resourceMap, dependsOnFieldName)
 		}
 	}
+	indexesToRemove := []int{}
+	if lbIndex != -1 {
+		indexesToRemove = append(indexesToRemove, lbIndex)
+	}
+	templateMap[resourcesFieldName] = removeIndexesFromArray(resources, indexesToRemove)
 	return nil
 }
 
@@ -110,6 +121,8 @@ func (t *Transformer) NormalizeForK8sVMASScalingUp(logger *logrus.Entry, templat
 	rtIndex := -1
 	nsgIndex := -1
 	vnetIndex := -1
+	vmasIndexes := make([]int, 0)
+
 	resources := templateMap[resourcesFieldName].([]interface{})
 	for index, resource := range resources {
 		resourceMap, ok := resource.(map[string]interface{})
@@ -146,6 +159,10 @@ func (t *Transformer) NormalizeForK8sVMASScalingUp(logger *logrus.Entry, templat
 			}
 			vnetIndex = index
 		}
+		if ok && resourceType == vmasResourceType {
+			// All availability sets can be removed
+			vmasIndexes = append(vmasIndexes, index)
+		}
 
 		dependencies, ok := resourceMap[dependsOnFieldName].([]interface{})
 		if !ok {
@@ -156,7 +173,8 @@ func (t *Transformer) NormalizeForK8sVMASScalingUp(logger *logrus.Entry, templat
 			dependency := dependencies[dIndex].(string)
 			if strings.Contains(dependency, nsgResourceType) || strings.Contains(dependency, nsgID) ||
 				strings.Contains(dependency, rtResourceType) || strings.Contains(dependency, rtID) ||
-				strings.Contains(dependency, vnetResourceType) || strings.Contains(dependency, vnetID) {
+				strings.Contains(dependency, vnetResourceType) || strings.Contains(dependency, vnetID) ||
+				strings.Contains(dependency, vmasResourceType) {
 				dependencies = append(dependencies[:dIndex], dependencies[dIndex+1:]...)
 			}
 		}
@@ -176,13 +194,17 @@ func (t *Transformer) NormalizeForK8sVMASScalingUp(logger *logrus.Entry, templat
 	}
 
 	if rtIndex == -1 {
-		logger.Infof("Found no resources with type %s in the template.", rtResourceType)
+		logger.Debugf("Found no resources with type %s in the template.", rtResourceType)
 	} else {
 		indexesToRemove = append(indexesToRemove, rtIndex)
 	}
 
 	if vnetIndex != -1 {
 		indexesToRemove = append(indexesToRemove, vnetIndex)
+	}
+
+	if len(vmasIndexes) != 0 {
+		indexesToRemove = append(indexesToRemove, vmasIndexes...)
 	}
 
 	indexesToRemove = append(indexesToRemove, nsgIndex)
@@ -213,7 +235,8 @@ func (t *Transformer) NormalizeMasterResourcesForScaling(logger *logrus.Entry, t
 
 		resourceType, ok := resourceMap[typeFieldName].(string)
 		if !ok || resourceType != vmResourceType {
-			resourceName, ok := resourceMap[nameFieldName].(string)
+			var resourceName string
+			resourceName, ok = resourceMap[nameFieldName].(string)
 			if !ok {
 				logger.Warnf("Template improperly formatted")
 				continue
@@ -267,7 +290,7 @@ func (t *Transformer) removeCustomData(logger *logrus.Entry, resourceProperties 
 		return ok
 	}
 
-	if osProfile[customDataFieldName] != nil {
+	if osProfile[customDataFieldName] != nil && osProfile[windowsConfigurationFieldName] == nil {
 		delete(osProfile, customDataFieldName)
 	}
 	return ok
@@ -359,8 +382,18 @@ func (t *Transformer) NormalizeResourcesForK8sMasterUpgrade(logger *logrus.Entry
 				continue
 			}
 
-			dataDisks := storageProfile[dataDisksFieldName].([]interface{})
-			dataDisk, _ := dataDisks[0].(map[string]interface{})
+			dataDisks, ok := storageProfile[dataDisksFieldName].([]interface{})
+			if !ok {
+				logger.Warnf("Template improperly formatted for field name: %s, property name: %s", storageProfileFieldName, dataDisksFieldName)
+				continue
+			}
+
+			dataDisk, ok := dataDisks[0].(map[string]interface{})
+			if !ok {
+				logger.Warnf("Template improperly formatted for field name: %s, there is no data disks defined", dataDisksFieldName)
+				continue
+			}
+
 			dataDisk[createOptionFieldName] = "attach"
 
 			if isMasterManagedDisk {

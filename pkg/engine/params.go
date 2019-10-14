@@ -13,7 +13,7 @@ import (
 	"github.com/Azure/aks-engine/pkg/helpers"
 )
 
-func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVersion string) (paramsMap, error) {
+func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVersion string) paramsMap {
 	properties := cs.Properties
 	location := cs.Location
 	parametersMap := paramsMap{}
@@ -39,14 +39,17 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 
 	addValue(parametersMap, "fqdnEndpointSuffix", cloudSpecConfig.EndpointConfig.ResourceManagerVMDNSSuffix)
 	addValue(parametersMap, "targetEnvironment", helpers.GetTargetEnv(cs.Location, cs.Properties.GetCustomCloudName()))
-	addValue(parametersMap, "linuxAdminUsername", properties.LinuxProfile.AdminUsername)
-	if properties.LinuxProfile.CustomSearchDomain != nil {
-		addValue(parametersMap, "searchDomainName", properties.LinuxProfile.CustomSearchDomain.Name)
-		addValue(parametersMap, "searchDomainRealmUser", properties.LinuxProfile.CustomSearchDomain.RealmUser)
-		addValue(parametersMap, "searchDomainRealmPassword", properties.LinuxProfile.CustomSearchDomain.RealmPassword)
-	}
-	if properties.LinuxProfile.CustomNodesDNS != nil {
-		addValue(parametersMap, "dnsServer", properties.LinuxProfile.CustomNodesDNS.DNSServer)
+	linuxProfile := properties.LinuxProfile
+	if linuxProfile != nil {
+		addValue(parametersMap, "linuxAdminUsername", linuxProfile.AdminUsername)
+		if linuxProfile.CustomSearchDomain != nil {
+			addValue(parametersMap, "searchDomainName", linuxProfile.CustomSearchDomain.Name)
+			addValue(parametersMap, "searchDomainRealmUser", linuxProfile.CustomSearchDomain.RealmUser)
+			addValue(parametersMap, "searchDomainRealmPassword", linuxProfile.CustomSearchDomain.RealmPassword)
+		}
+		if linuxProfile.CustomNodesDNS != nil {
+			addValue(parametersMap, "dnsServer", linuxProfile.CustomNodesDNS.DNSServer)
+		}
 	}
 	// masterEndpointDNSNamePrefix is the basis for storage account creation across dcos, swarm, and k8s
 	if properties.MasterProfile != nil {
@@ -62,12 +65,15 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 			if properties.MasterProfile.IsVirtualMachineScaleSets() {
 				addValue(parametersMap, "agentVnetSubnetID", properties.MasterProfile.AgentVnetSubnetID)
 			}
-			if properties.OrchestratorProfile.IsKubernetes() {
+			if properties.OrchestratorProfile.IsKubernetes() && properties.MasterProfile.VnetCidr != "" {
 				addValue(parametersMap, "vnetCidr", properties.MasterProfile.VnetCidr)
 			}
 		} else {
 			addValue(parametersMap, "masterSubnet", properties.MasterProfile.Subnet)
 			addValue(parametersMap, "agentSubnet", properties.MasterProfile.AgentSubnet)
+			if cs.Properties.FeatureFlags.IsFeatureEnabled("EnableIPv6DualStack") {
+				addValue(parametersMap, "masterSubnetIPv6", properties.MasterProfile.SubnetIPv6)
+			}
 		}
 		addValue(parametersMap, "firstConsecutiveStaticIP", properties.MasterProfile.FirstConsecutiveStaticIP)
 		addValue(parametersMap, "masterVMSize", properties.MasterProfile.VMSize)
@@ -78,11 +84,14 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 	if properties.HostedMasterProfile != nil {
 		addValue(parametersMap, "masterSubnet", properties.HostedMasterProfile.Subnet)
 	}
-	addValue(parametersMap, "sshRSAPublicKey", properties.LinuxProfile.SSH.PublicKeys[0].KeyData)
-	for i, s := range properties.LinuxProfile.Secrets {
-		addValue(parametersMap, fmt.Sprintf("linuxKeyVaultID%d", i), s.SourceVault.ID)
-		for j, c := range s.VaultCertificates {
-			addValue(parametersMap, fmt.Sprintf("linuxKeyVaultID%dCertificateURL%d", i, j), c.CertificateURL)
+
+	if linuxProfile != nil {
+		addValue(parametersMap, "sshRSAPublicKey", linuxProfile.SSH.PublicKeys[0].KeyData)
+		for i, s := range linuxProfile.Secrets {
+			addValue(parametersMap, fmt.Sprintf("linuxKeyVaultID%d", i), s.SourceVault.ID)
+			for j, c := range s.VaultCertificates {
+				addValue(parametersMap, fmt.Sprintf("linuxKeyVaultID%dCertificateURL%d", i, j), c.CertificateURL)
+			}
 		}
 	}
 
@@ -115,8 +124,7 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 		dcosClusterPackageListID := cloudSpecConfig.DCOSSpecConfig.DcosClusterPackageListID
 		dcosProviderPackageID := cloudSpecConfig.DCOSSpecConfig.DcosProviderPackageID
 
-		switch properties.OrchestratorProfile.OrchestratorType {
-		case api.DCOS:
+		if properties.OrchestratorProfile.OrchestratorType == api.DCOS {
 			switch properties.OrchestratorProfile.OrchestratorVersion {
 			case common.DCOSVersion1Dot8Dot8:
 				dcosBootstrapURL = cloudSpecConfig.DCOSSpecConfig.DCOS188BootstrapDownloadURL
@@ -211,20 +219,20 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 	if properties.HasWindows() {
 		addValue(parametersMap, "windowsAdminUsername", properties.WindowsProfile.AdminUsername)
 		addSecret(parametersMap, "windowsAdminPassword", properties.WindowsProfile.AdminPassword, false)
-		if properties.WindowsProfile.ImageVersion != "" {
-			addValue(parametersMap, "agentWindowsVersion", properties.WindowsProfile.ImageVersion)
-		}
-		if properties.WindowsProfile.WindowsImageSourceURL != "" {
+
+		if properties.WindowsProfile.HasCustomImage() {
 			addValue(parametersMap, "agentWindowsSourceUrl", properties.WindowsProfile.WindowsImageSourceURL)
-		}
-		if properties.WindowsProfile.WindowsPublisher != "" {
+		} else if properties.WindowsProfile.HasImageRef() {
+			addValue(parametersMap, "agentWindowsImageResourceGroup", properties.WindowsProfile.ImageRef.ResourceGroup)
+			addValue(parametersMap, "agentWindowsImageName", properties.WindowsProfile.ImageRef.Name)
+		} else {
 			addValue(parametersMap, "agentWindowsPublisher", properties.WindowsProfile.WindowsPublisher)
-		}
-		if properties.WindowsProfile.WindowsOffer != "" {
 			addValue(parametersMap, "agentWindowsOffer", properties.WindowsProfile.WindowsOffer)
+			addValue(parametersMap, "agentWindowsSku", properties.WindowsProfile.GetWindowsSku())
+			addValue(parametersMap, "agentWindowsVersion", properties.WindowsProfile.ImageVersion)
+
 		}
 
-		addValue(parametersMap, "agentWindowsSku", properties.WindowsProfile.GetWindowsSku())
 		addValue(parametersMap, "windowsDockerVersion", properties.WindowsProfile.GetWindowsDockerVersion())
 
 		for i, s := range properties.WindowsProfile.Secrets {
@@ -247,5 +255,5 @@ func getParameters(cs *api.ContainerService, generatorCode string, aksEngineVers
 		}
 	}
 
-	return parametersMap, nil
+	return parametersMap
 }

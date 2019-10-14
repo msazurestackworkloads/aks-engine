@@ -41,7 +41,7 @@
     },
     {{end}}
     "{{.Name}}VMSize": {
-      {{GetAgentAllowedSizes}}
+      {{GetKubernetesAllowedVMSKUs}}
       "defaultValue": "{{.VMSize}}",
       "metadata": {
         "description": "The size of the Virtual Machine."
@@ -92,7 +92,7 @@
       "type": "string"
     },
     "{{.Name}}osImageVersion": {
-      "defaultValue": "16.04.201804050",
+      "defaultValue": "latest",
       "metadata": {
         "description": "OS image version."
       },

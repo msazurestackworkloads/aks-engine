@@ -5,6 +5,7 @@ package cmd
 
 import (
 	"context"
+	"encoding/base64"
 	"fmt"
 	"io/ioutil"
 	"math/rand"
@@ -72,23 +73,27 @@ func newDeployCmd() *cobra.Command {
 		Long:  deployLongDescription,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := dc.validateArgs(cmd, args); err != nil {
-				log.Fatalf("error validating deployCmd: %s", err.Error())
+				return errors.Wrap(err, "validating deployCmd")
 			}
 			if err := dc.mergeAPIModel(); err != nil {
-				log.Fatalf("error merging API model in deployCmd: %s", err.Error())
+				return errors.Wrap(err, "merging API model in deployCmd")
 			}
-			if err := dc.loadAPIModel(cmd, args); err != nil {
-				log.Fatalf("failed to load apimodel: %s", err.Error())
+			if err := dc.loadAPIModel(); err != nil {
+				return errors.Wrap(err, "loading API model")
 			}
-			if _, _, err := dc.validateApimodel(); err != nil {
-				log.Fatalf("Failed to validate the apimodel after populating values: %s", err.Error())
+			if dc.apiVersion == "vlabs" {
+				if err := dc.validateAPIModelAsVLabs(); err != nil {
+					return errors.Wrap(err, "validating API model after populating values")
+				}
+			} else {
+				log.Warnf("API model validation is only available for \"apiVersion\": \"vlabs\", skipping validation...")
 			}
 			return dc.run()
 		},
 	}
 
 	f := deployCmd.Flags()
-	f.StringVarP(&dc.apimodelPath, "api-model", "m", "", "path to the apimodel file")
+	f.StringVarP(&dc.apimodelPath, "api-model", "m", "", "path to your cluster definition file")
 	f.StringVarP(&dc.dnsPrefix, "dns-prefix", "p", "", "dns prefix (unique name for the cluster)")
 	f.BoolVar(&dc.autoSuffix, "auto-suffix", false, "automatically append a compressed timestamp to the dnsPrefix to ensure unique cluster name automatically")
 	f.StringVarP(&dc.outputDirectory, "output-directory", "o", "", "output directory (derived from FQDN if absent)")
@@ -109,7 +114,7 @@ func (dc *deployCmd) validateArgs(cmd *cobra.Command, args []string) error {
 
 	dc.locale, err = i18n.LoadTranslations()
 	if err != nil {
-		return errors.Wrap(err, "error loading translation files")
+		return errors.Wrap(err, "loading translation files")
 	}
 
 	if dc.apimodelPath == "" {
@@ -140,14 +145,15 @@ func (dc *deployCmd) mergeAPIModel() error {
 
 	if dc.apimodelPath == "" {
 		log.Infoln("no --api-model was specified, using default model")
-		f, err := ioutil.TempFile("", fmt.Sprintf("%s-default-api-model_%s-%s_", filepath.Base(os.Args[0]), BuildSHA, GitTreeState))
+		var f *os.File
+		f, err = ioutil.TempFile("", fmt.Sprintf("%s-default-api-model_%s-%s_", filepath.Base(os.Args[0]), BuildSHA, GitTreeState))
 		if err != nil {
 			return errors.Wrap(err, "error creating temp file for default API model")
 		}
 		log.Infoln("default api model generated at", f.Name())
 
 		defer f.Close()
-		if err := writeDefaultModel(f); err != nil {
+		if err = writeDefaultModel(f); err != nil {
 			return err
 		}
 		dc.apimodelPath = f.Name()
@@ -170,7 +176,7 @@ func (dc *deployCmd) mergeAPIModel() error {
 	return nil
 }
 
-func (dc *deployCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
+func (dc *deployCmd) loadAPIModel() error {
 	var caCertificateBytes []byte
 	var caKeyBytes []byte
 	var err error
@@ -185,14 +191,6 @@ func (dc *deployCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
 	dc.containerService, dc.apiVersion, err = apiloader.LoadContainerServiceFromFile(dc.apimodelPath, false, false, nil)
 	if err != nil {
 		return errors.Wrap(err, "error parsing the api model")
-	}
-
-	if dc.outputDirectory == "" {
-		if dc.containerService.Properties.MasterProfile != nil {
-			dc.outputDirectory = path.Join("_output", dc.containerService.Properties.MasterProfile.DNSPrefix)
-		} else {
-			dc.outputDirectory = path.Join("_output", dc.containerService.Properties.HostedMasterProfile.DNSPrefix)
-		}
 	}
 
 	// consume dc.caCertificatePath and dc.caPrivateKeyPath
@@ -222,6 +220,14 @@ func (dc *deployCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
 		return errors.New("--location does not match api model location")
 	}
 
+	if dc.containerService.Properties.IsAzureStackCloud() {
+		err = dc.containerService.SetCustomCloudProfileEnvironment()
+		if err != nil {
+			return errors.Wrap(err, "error parsing the api model")
+		}
+		writeCustomCloudProfile(dc.containerService)
+	}
+
 	if err = dc.getAuthArgs().validateAuthArgs(); err != nil {
 		return err
 	}
@@ -241,7 +247,6 @@ func (dc *deployCmd) loadAPIModel(cmd *cobra.Command, args []string) error {
 }
 
 func autofillApimodel(dc *deployCmd) error {
-	var err error
 
 	if dc.containerService.Properties.LinuxProfile != nil {
 		if dc.containerService.Properties.LinuxProfile.AdminUsername == "" {
@@ -267,7 +272,11 @@ func autofillApimodel(dc *deployCmd) error {
 	}
 
 	if dc.outputDirectory == "" {
-		dc.outputDirectory = path.Join("_output", dc.containerService.Properties.MasterProfile.DNSPrefix)
+		if dc.containerService.Properties.MasterProfile != nil {
+			dc.outputDirectory = path.Join("_output", dc.containerService.Properties.MasterProfile.DNSPrefix)
+		} else {
+			dc.outputDirectory = path.Join("_output", dc.containerService.Properties.HostedMasterProfile.DNSPrefix)
+		}
 	}
 
 	if _, err := os.Stat(dc.outputDirectory); !dc.forceOverwrite && err == nil {
@@ -289,6 +298,7 @@ func autofillApimodel(dc *deployCmd) error {
 		translator := &i18n.Translator{
 			Locale: dc.locale,
 		}
+		var publicKey string
 		_, publicKey, err := helpers.CreateSaveSSH(dc.containerService.Properties.LinuxProfile.AdminUsername, dc.outputDirectory, translator)
 		if err != nil {
 			return errors.Wrap(err, "Failed to generate SSH Key")
@@ -299,7 +309,7 @@ func autofillApimodel(dc *deployCmd) error {
 
 	ctx, cancel := context.WithTimeout(context.Background(), armhelpers.DefaultARMOperationTimeout)
 	defer cancel()
-	_, err = dc.client.EnsureResourceGroup(ctx, dc.resourceGroup, dc.location, nil)
+	_, err := dc.client.EnsureResourceGroup(ctx, dc.resourceGroup, dc.location, nil)
 	if err != nil {
 		return err
 	}
@@ -318,9 +328,9 @@ func autofillApimodel(dc *deployCmd) error {
 			appURL := fmt.Sprintf("https://%s/", appName)
 			var replyURLs *[]string
 			var requiredResourceAccess *[]graphrbac.RequiredResourceAccess
-			applicationResp, servicePrincipalObjectID, secret, err := dc.client.CreateApp(ctx, appName, appURL, replyURLs, requiredResourceAccess)
-			if err != nil {
-				return errors.Wrap(err, "apimodel invalid: ServicePrincipalProfile was empty, and we failed to create valid credentials")
+			applicationResp, servicePrincipalObjectID, secret, createErr := dc.client.CreateApp(ctx, appName, appURL, replyURLs, requiredResourceAccess)
+			if createErr != nil {
+				return errors.Wrap(createErr, "apimodel invalid: ServicePrincipalProfile was empty, and we failed to create valid credentials")
 			}
 			applicationID := to.String(applicationResp.AppID)
 			log.Warnf("created application with applicationID (%s) and servicePrincipalObjectID (%s).", applicationID, servicePrincipalObjectID)
@@ -345,31 +355,34 @@ func autofillApimodel(dc *deployCmd) error {
 			}
 		}
 	}
-	return nil
-}
 
-func (dc *deployCmd) validateApimodel() (*api.ContainerService, string, error) {
-	apiloader := &api.Apiloader{
-		Translator: &i18n.Translator{
-			Locale: dc.locale,
-		},
-	}
+	if k8sConfig != nil && k8sConfig.Addons != nil && k8sConfig.IsContainerMonitoringAddonEnabled() {
+		log.Infoln("container monitoring addon enabled")
+		var workspaceDomain string
+		cloudspecConfig := dc.containerService.GetCloudSpecConfig()
+		switch cloudspecConfig.CloudName {
+		case "AzurePublicCloud":
+			workspaceDomain = "opinsights.azure.com"
+		case "AzureChinaCloud":
+			workspaceDomain = "opinsights.azure.cn"
+		case "AzureUSGovernmentCloud":
+			workspaceDomain = "opinsights.azure.us"
+		default:
+			return errors.Wrapf(err, "apimodel: container monitoring addon not supported in this cloud: %s", cloudspecConfig.CloudName)
+		}
 
-	p := dc.containerService.Properties
-	if strings.ToLower(p.OrchestratorProfile.OrchestratorType) == "kubernetes" {
-		if p.ServicePrincipalProfile == nil || (p.ServicePrincipalProfile.ClientID == "" || (p.ServicePrincipalProfile.Secret == "" && p.ServicePrincipalProfile.KeyvaultSecretRef == nil)) {
-			if p.OrchestratorProfile.KubernetesConfig != nil && !p.OrchestratorProfile.KubernetesConfig.UseManagedIdentity {
-				return nil, "", errors.New("when using the kubernetes orchestrator, must either set useManagedIdentity in the kubernetes config or set --client-id and --client-secret or KeyvaultSecretRef of secret (also available in the API model)")
-			}
+		err := dc.configureContainerMonitoringAddon(ctx, k8sConfig, workspaceDomain)
+		if err != nil {
+			return errors.Wrap(err, "Failed to configure container monitoring addon")
 		}
 	}
 
-	// This isn't terribly elegant, but it's the easiest way to go for now w/o duplicating a bunch of code
-	rawVersionedAPIModel, err := apiloader.SerializeContainerService(dc.containerService, dc.apiVersion)
-	if err != nil {
-		return nil, "", err
-	}
-	return apiloader.DeserializeContainerService(rawVersionedAPIModel, true, false, nil)
+	return nil
+}
+
+// validateAPIModelAsVLabs converts the ContainerService object to a vlabs ContainerService object and validates it
+func (dc *deployCmd) validateAPIModelAsVLabs() error {
+	return api.ConvertContainerServiceToVLabs(dc.containerService).Validate(false)
 }
 
 func (dc *deployCmd) run() error {
@@ -381,27 +394,29 @@ func (dc *deployCmd) run() error {
 
 	templateGenerator, err := engine.InitializeTemplateGenerator(ctx)
 	if err != nil {
-		log.Fatalf("failed to initialize template generator: %s", err.Error())
+		return errors.Wrap(err, "initializing template generator")
 	}
 
-	certsgenerated, err := dc.containerService.SetPropertiesDefaults(false, false)
+	certsgenerated, err := dc.containerService.SetPropertiesDefaults(api.PropertiesDefaultsParams{
+		IsScale:    false,
+		IsUpgrade:  false,
+		PkiKeySize: helpers.DefaultPkiKeySize,
+	})
 	if err != nil {
-		log.Fatalf("error in SetPropertiesDefaults template %s: %s", dc.apimodelPath, err.Error())
-		os.Exit(1)
+		return errors.Wrapf(err, "in SetPropertiesDefaults template %s", dc.apimodelPath)
 	}
 
-	template, parameters, err := templateGenerator.GenerateTemplate(dc.containerService, engine.DefaultGeneratorCode, BuildTag)
+	template, parameters, err := templateGenerator.GenerateTemplateV2(dc.containerService, engine.DefaultGeneratorCode, BuildTag)
 	if err != nil {
-		log.Fatalf("error generating template %s: %s", dc.apimodelPath, err.Error())
-		os.Exit(1)
+		return errors.Wrapf(err, "generating template %s", dc.apimodelPath)
 	}
 
 	if template, err = transform.PrettyPrintArmTemplate(template); err != nil {
-		log.Fatalf("error pretty printing template: %s \n", err.Error())
+		return errors.Wrap(err, "pretty-printing template")
 	}
 	var parametersFile string
 	if parametersFile, err = transform.BuildAzureParametersFile(parameters); err != nil {
-		log.Fatalf("error pretty printing template parameters: %s \n", err.Error())
+		return errors.Wrap(err, "pretty-printing template parameters")
 	}
 
 	writer := &engine.ArtifactWriter{
@@ -410,20 +425,18 @@ func (dc *deployCmd) run() error {
 		},
 	}
 	if err = writer.WriteTLSArtifacts(dc.containerService, dc.apiVersion, template, parametersFile, dc.outputDirectory, certsgenerated, dc.parametersOnly); err != nil {
-		log.Fatalf("error writing artifacts: %s \n", err.Error())
+		return errors.Wrap(err, "writing artifacts")
 	}
 
 	templateJSON := make(map[string]interface{})
 	parametersJSON := make(map[string]interface{})
 
-	err = json.Unmarshal([]byte(template), &templateJSON)
-	if err != nil {
-		log.Fatalln(err)
+	if err = json.Unmarshal([]byte(template), &templateJSON); err != nil {
+		return err
 	}
 
-	err = json.Unmarshal([]byte(parameters), &parametersJSON)
-	if err != nil {
-		log.Fatalln(err)
+	if err = json.Unmarshal([]byte(parameters), &parametersJSON); err != nil {
+		return err
 	}
 
 	deploymentSuffix := dc.random.Int31()
@@ -442,8 +455,78 @@ func (dc *deployCmd) run() error {
 			body, _ := ioutil.ReadAll(res.Body)
 			log.Errorf(string(body))
 		}
-		log.Fatalln(err)
+		return err
 	}
 
+	return nil
+}
+
+// configure api model addon config with container monitoring addon
+func (dc *deployCmd) configureContainerMonitoringAddon(ctx context.Context, k8sConfig *api.KubernetesConfig, workspaceDomain string) error {
+	log.Infoln("configuring container monitoring addon info")
+	if k8sConfig == nil {
+		return errors.New("KubernetesConfig either null or invalid")
+	}
+
+	var workspaceResourceID string
+	var err error
+	addon := k8sConfig.GetAddonByName("container-monitoring")
+	if addon.Config == nil || len(addon.Config) == 0 || addon.Config["logAnalyticsWorkspaceResourceId"] != "" {
+		workspaceResourceID = strings.TrimSpace(addon.Config["logAnalyticsWorkspaceResourceId"])
+		if workspaceResourceID != "" {
+			log.Infoln("using provided log analytics workspace resource id:", workspaceResourceID)
+			if !strings.HasPrefix(workspaceResourceID, "/") {
+				workspaceResourceID = "/" + workspaceResourceID
+			}
+			workspaceResourceID = strings.TrimSuffix(workspaceResourceID, "/")
+		} else {
+			log.Infoln("creating default log analytics workspace if not exists already")
+			workspaceResourceID, err = dc.client.EnsureDefaultLogAnalyticsWorkspace(ctx, dc.resourceGroup, dc.location)
+			if err != nil {
+				return errors.Wrap(err, "apimodel: Failed to create default log analytics workspace for container monitoring addon")
+			}
+			log.Infoln("successfully created or fetched default log analytics workspace:", workspaceResourceID)
+		}
+		resourceParts := strings.Split(workspaceResourceID, "/")
+		if len(resourceParts) != 9 {
+			return errors.Errorf("%s is not a valid azure resource id", workspaceResourceID)
+		}
+		workspaceSubscriptionID := resourceParts[2]
+		workspaceResourceGroup := resourceParts[4]
+		workspaceName := resourceParts[8]
+		log.Infoln("Retrieving log analytics workspace Guid, Key and location details for the workspace resource:", workspaceResourceID)
+		wsID, wsKey, wsLocation, err := dc.client.GetLogAnalyticsWorkspaceInfo(ctx, workspaceSubscriptionID, workspaceResourceGroup, workspaceName)
+		if err != nil {
+			return errors.Wrap(err, "apimodel: Failed to get the workspace Guid, Key and location details ")
+		}
+		log.Infoln("successfully retrieved log analytics workspace details")
+		log.Infoln("log analytics workspace id: ", wsID)
+
+		log.Infoln("adding container insights solution to log analytics workspace: ", workspaceResourceID)
+		_, err = dc.client.AddContainerInsightsSolution(ctx, workspaceSubscriptionID, workspaceResourceGroup, workspaceName, wsLocation)
+		if err != nil {
+			return errors.Wrap(err, "apimodel: Failed to get add container insights solution")
+		}
+		log.Infoln("successfully added container insights solution to log analytics workspace: ", workspaceResourceID)
+
+		log.Infoln("Adding log analytics workspaceGuid and workspaceKey, workspaceResourceId to the container monitoring addon")
+		for _, addon := range dc.containerService.Properties.OrchestratorProfile.KubernetesConfig.Addons {
+			if addon.Name == "container-monitoring" {
+				addon.Config["workspaceGuid"] = base64.StdEncoding.EncodeToString([]byte(wsID))
+				addon.Config["workspaceKey"] = base64.StdEncoding.EncodeToString([]byte(wsKey))
+				addon.Config["logAnalyticsWorkspaceResourceId"] = workspaceResourceID
+				addon.Config["workspaceDomain"] = base64.StdEncoding.EncodeToString([]byte(workspaceDomain))
+			}
+		}
+
+	} else {
+		log.Infoln("using provided workspaceGuid, workspaceKey in the container addon config")
+		workspaceGUID := addon.Config["workspaceGuid"]
+		workspaceKey := addon.Config["workspaceKey"]
+		addon.Config["workspaceDomain"] = base64.StdEncoding.EncodeToString([]byte(workspaceDomain))
+		log.Infoln("workspaceGuid:", workspaceGUID)
+		log.Infoln("workspaceKey:", workspaceKey)
+		log.Infoln("workspaceDomain:", workspaceDomain)
+	}
 	return nil
 }

@@ -6,10 +6,12 @@
 |Calico Network Policy|Alpha|`vlabs`|[kubernetes-calico.json](../../examples/networkpolicy/kubernetes-calico-azure.json)|[Description](#feat-calico)|
 |Cilium Network Policy|Alpha|`vlabs`|[kubernetes-cilium.json](../../examples/networkpolicy/kubernetes-cilium.json)|[Description](#feat-cilium)|
 |Custom VNET|Beta|`vlabs`|[kubernetesvnet-azure-cni.json](../../examples/vnet/kubernetesvnet-azure-cni.json)|[Description](#feat-custom-vnet)|
-|Clear Containers Runtime|Alpha|`vlabs`|[kubernetes-clear-containers.json](../../examples/kubernetes-clear-containers.json)|[Description](#feat-clear-containers)|
 |Kata Containers Runtime|Alpha|`vlabs`|[kubernetes-kata-containers.json](../../examples/kubernetes-kata-containers.json)|[Description](#feat-kata-containers)|
 |Private Cluster|Alpha|`vlabs`|[kubernetes-private-cluster.json](../../examples/kubernetes-config/kubernetes-private-cluster.json)|[Description](#feat-private-cluster)|
 |Azure Key Vault Encryption|Alpha|`vlabs`|[kubernetes-keyvault-encryption.json](../../examples/kubernetes-config/kubernetes-keyvault-encryption.json)|[Description](#feat-keyvault-encryption)|
+|Shared Image Gallery images|Alpha|`vlabs`|[custom-shared-image.json](../../examples/custom-shared-image.json)|[Description](#feat-shared-image-gallery)|
+|Ephemeral OS Disks|Experimental|`vlabs`|[ephmeral-disk.json](../../examples/disks-ephemeral/ephemeral-disks.json)|[Description](#ephemeral-os-disks)|
+
 
 <a name="feat-kubernetes-msi"></a>
 
@@ -17,7 +19,7 @@
 
 Enabling Managed Identity configures aks-engine to include and use MSI identities for all interactions with the Azure Resource Manager (ARM) API.
 
-Instead of using a static servic principal written to `/etc/kubernetes/azure.json`, Kubernetes will use a dynamic, time-limited token fetched from the MSI extension running on master and agent nodes. This support is currently alpha and requires Kubernetes v1.9.1 or newer.
+Instead of using a static service principal written to `/etc/kubernetes/azure.json`, Kubernetes will use a dynamic, time-limited token fetched from the MSI extension running on master and agent nodes. This support is currently alpha and requires Kubernetes v1.9.1 or newer.
 
 Enable Managed Identity by adding `useManagedIdentity` in `kubernetesConfig`.
 
@@ -29,15 +31,17 @@ Enable Managed Identity by adding `useManagedIdentity` in `kubernetesConfig`.
 
 <a name="feat-managed-disks"></a>
 
-## Optional: Disable Kubernetes Role-Based Access Control (RBAC)
+## Optional: Disable Kubernetes Role-Based Access Control (RBAC) (for clusters running Kubernetes versions before 1.15.0)
 
 By default, the cluster will be provisioned with [Role-Based Access Control](https://kubernetes.io/docs/admin/authorization/rbac/) enabled. Disable RBAC by adding `enableRbac` in `kubernetesConfig` in the api model:
 
-```console
-      "kubernetesConfig": {
-        "enableRbac": false
-      }
+```json
+"kubernetesConfig": {
+  "enableRbac": false
+}
 ```
+
+To emphasize: RBAC support is required for all Kubernetes clusters >= 1.15.0
 
 See [cluster definitions](clusterdefinitions.md#kubernetesconfig) for further detail.
 
@@ -82,7 +86,7 @@ In order to use these storage classes the following conditions must be met.
 ```console
 kubectl get nodes -l storageprofile=managed
 NAME                    STATUS    AGE       VERSION
-k8s-agent1-23731866-0   Ready     24m       v1.7.2
+k8s-agent1-23731866-0   Ready     24m       v1.12.8
 ```
 
 - The VM size must support the type of managed disk type requested. For example, Premium VM sizes with managed OS disks support both managed-standard and managed-premium storage classes whereas Standard VM sizes with managed OS disks only support managed-standard storage class.
@@ -109,9 +113,9 @@ spec:
 Kubernetes clusters are configured by default to use the [Azure CNI plugin](https://github.com/Azure/azure-container-networking) which provides an Azure native networking experience. Pods will receive IP addresses directly from the vnet subnet on which they're hosted. If the api model doesn't specify explicitly, aks-engine will automatically provide the following `networkPlugin` configuration in `kubernetesConfig`:
 
 ```json
-      "kubernetesConfig": {
-        "networkPlugin": "azure"
-      }
+"kubernetesConfig": {
+  "networkPlugin": "azure"
+}
 ```
 
 ### Additional Azure integrated networking configuration
@@ -121,27 +125,27 @@ In addition you can modify the following settings to change the networking behav
 IP addresses are pre-allocated in the subnet. Using ipAddressCount you can specify how many you would like to pre-allocate. This number needs to account for number of pods you would like to run on that subnet.
 
 ```json
-    "masterProfile": {
-      "ipAddressCount": 200
-    },
+"masterProfile": {
+  "ipAddressCount": 200
+},
 ```
 
 Currently, the IP addresses that are pre-allocated aren't allowed by the default natter for Internet bound traffic. In order to work around this limitation we allow the user to specify the vnetCidr (eg. 10.0.0.0/8) to be EXCLUDED from the default masquerade rule that is applied. The result is that traffic destined for anything within that block will NOT be natted on the outbound VM interface. This field has been called vnetCidr but may be wider than the vnet cidr block if you would like POD IPs to be routable across vnets using vnet-peering or express-route.
 
 ```json
-    "masterProfile": {
-      "vnetCidr": "10.0.0.0/8",
-    },
+"masterProfile": {
+  "vnetCidr": "10.0.0.0/8",
+},
 ```
 
-When using Azure integrated networking the maxPods setting will be set to 30 by default. This number can be changed keeping in mind that there is a limit of 4,000 IPs per vnet.
+When using Azure integrated networking the maxPods setting will be set to 30 by default. This number can be changed keeping in mind that there is a limit of 65,536 IPs per vnet.
 
 ```json
-      "kubernetesConfig": {
-        "kubeletConfig": {
-          "--max-pods": "50"
-        }
-      }
+"kubernetesConfig": {
+  "kubeletConfig": {
+    "--max-pods": "50"
+  }
+}
 ```
 
 <a name="feat-calico"></a>
@@ -169,6 +173,25 @@ Per default Calico still allows all communication within the cluster. Using Kube
 - [NetworkPolicy User Guide](https://kubernetes.io/docs/user-guide/networkpolicies/)
 - [NetworkPolicy Example Walkthrough](https://kubernetes.io/docs/getting-started-guides/network-policy/walkthrough/)
 - [Calico Kubernetes](https://github.com/Azure/aks-engine/blob/master/examples/networkpolicy)
+
+### Calico 3.3 cleanup after upgrading to 3.5 or greater
+
+Because Calico 3.3 is using Calico CNI, while Calico 3.5 or greater moves to Azure CNI, if the cluster is upgraded from calico 3.3 to 3.5 or greater, then some manual cluster resource cleanup will be required to successfully complete the upgrade. We've provided a sample resource spec here that can be used as an example:
+
+https://github.com/Azure/aks-engine/raw/master/docs/topics/calico-3.3.1-cleanup-after-upgrade.yaml
+
+There are some placeholder tokens in the above `yaml` file, so please reconcile those with the actual values in your cluster. Look for these placeholder strings in the spec, then compare with the running spec of the comparable pre-3.5 resource in your cluster, and modify the cleanup spec accordingly:
+
+- `<calicoIPAMConfig>`
+- `<kubeClusterCidr>`
+
+And then using your modified file, do something like this:
+
+```sh
+kubectl delete -f calico-3.3.1-cleanup-after-upgrade-modified-with-my-cluster-configuration.yaml
+```
+
+After this, addon-manager would enforce the correct spec for Calico 3.5 or greater.
 
 <a name="feat-cilium"></a>
 
@@ -225,7 +248,7 @@ In larger subnets (e.g., `/16`) it's not as practically useful to push static IP
 
 Before provisioning, modify the `masterProfile` and `agentPoolProfiles` to match the above requirements, with the below being a representative example:
 
-```json
+```js
 "masterProfile": {
   ...
   "vnetSubnetId": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.Network/virtualNetworks/VNET_NAME/subnets/MASTER_SUBNET_NAME",
@@ -252,7 +275,7 @@ Modify `agentPoolProfiles`, `vnetSubnetId` should be set to the value of the `ag
 *NOTE: The `firstConsecutiveStaticIP` configuration should be empty and will be derived from an offset and the first IP in the vnetCidr.*
 For example, if `vnetCidr` is `10.239.0.0/16`, `master` subnet is `10.239.0.0/17`, `agent` subnet is `10.239.128.0/17`, then `firstConsecutiveStaticIP` will be `10.239.0.4`.
 
-```json
+```js
 "masterProfile": {
   ...
   "vnetSubnetId": "/subscriptions/SUB_ID/resourceGroups/RG_NAME/providers/Microsoft.Network/virtualNetworks/VNET_NAME/subnets/MASTER_SUBNET_NAME",
@@ -278,17 +301,17 @@ The route table resource id is of the format: `/subscriptions/SUBSCRIPTIONID/res
 
 Existing subnets will need to use the Kubernetes-based Route Table so that machines can route to Kubernetes-based workloads.
 
-Update properties of all subnets in the existing VNET he route table resource by appending the following to subnet properties:
+Update properties of all subnets in the existing VNET route table resource by appending the following to subnet properties:
 
 ```json
 "routeTable": {
         "id": "/subscriptions/<SubscriptionId>/resourceGroups/<ResourceGroupName>/providers/Microsoft.Network/routeTables/k8s-master-<SOMEID>-routetable>"
-      }
+}
 ```
 
 E.g.:
 
-```json
+```js
 "subnets": [
     {
       "name": "subnetname",
@@ -306,37 +329,6 @@ E.g.:
 ]
 ```
 
-<a name="feat-clear-containers"></a>
-
-## Clear Containers
-
-You can designate kubernetes agents to use Intel's Clear Containers as the
-container runtime by setting:
-
-```json
-      "kubernetesConfig": {
-        "containerRuntime": "clear-containers"
-      }
-```
-
-You will need to make sure your agents are using a `vmSize` that [supports
-nested virtualization](https://azure.microsoft.com/en-us/blog/nested-virtualization-in-azure/).
-These are the `Dv3` or `Ev3` series nodes.
-
-This should look like:
-
-```json
-"agentPoolProfiles": [
-      {
-        "name": "agentpool1",
-        "count": 3,
-        "vmSize": "Standard_D4s_v3",
-        "availabilityProfile": "AvailabilitySet",
-        "diskSizesGB": [1023]
-      }
-    ],
-```
-
 <a name="feat-kata-containers"></a>
 
 ## Kata Containers
@@ -345,9 +337,9 @@ You can designate kubernetes agents to use Kata Containers as the
 container runtime by setting:
 
 ```json
-      "kubernetesConfig": {
-        "containerRuntime": "kata-containers"
-      }
+"kubernetesConfig": {
+  "containerRuntime": "kata-containers"
+}
 ```
 
 You will need to make sure your agents are using a `vmSize` that [supports
@@ -365,7 +357,7 @@ This should look like:
         "availabilityProfile": "AvailabilitySet",
         "diskSizesGB": [1023]
       }
-    ],
+],
 ```
 
 <a name="feat-private-cluster"></a>
@@ -375,10 +367,10 @@ This should look like:
 You can build a private Kubernetes cluster with no public IP addresses assigned by setting:
 
 ```json
-      "kubernetesConfig": {
-        "privateCluster": {
-          "enabled": true
-      }
+"kubernetesConfig": {
+  "privateCluster": {
+    "enabled": true
+}
 ```
 
 In order to access this cluster using kubectl commands, you will need a jumpbox in the same VNET (or onto a peer VNET that routes to the VNET). If you do not already have a jumpbox, you can use aks-engine to provision your jumpbox (see below) or create it manually. You can create a new jumpbox manually in the Azure Portal under "Create a resource > Compute > Ubuntu Server 16.04 LTS VM" or using the [az cli](https://docs.microsoft.com/en-us/cli/azure/vm?view=azure-cli-latest#az_vm_create). You will then be able to:
@@ -393,17 +385,17 @@ Alternatively, you may also ssh into your nodes (given that your ssh key is on t
 To auto-provision a jumpbox with your aks-engine deployment use:
 
 ```json
-      "kubernetesConfig": {
-        "privateCluster": {
-          "enabled": true,
-          "jumpboxProfile": {
-            "name": "my-jb",
-            "vmSize": "Standard_D4s_v3",
-            "osDiskSizeGB": 30,
-            "username": "azureuser",
-            "publicKey": "xxx"
-          }
-      }
+"kubernetesConfig": {
+  "privateCluster": {
+    "enabled": true,
+    "jumpboxProfile": {
+      "name": "my-jb",
+      "vmSize": "Standard_D4s_v3",
+      "osDiskSizeGB": 30,
+      "username": "azureuser",
+      "publicKey": "xxx"
+    }
+}
 ```
 
 <a name="feat-keyvault-encryption"></a>
@@ -435,3 +427,85 @@ To get `objectId` of the service principal:
 ```console
 az ad sp list --spn <YOUR SERVICE PRINCIPAL appId>
 ```
+
+<a name="feat-shared-image-gallery"></a>
+
+## Use a Shared Image Gallery image
+
+This is possible by specifying `imageReference` under `masterProfile` or on a given `agentPoolProfile`. It also requires setting the distro to an appropriate value (`ubuntu` or `coreos`). When using `imageReference` with Shared Image Galleries, provide an image name and version, as well as the resource group, subscription, and name of the gallery. Example:
+
+```json
+{
+  "apiVersion": "vlabs",
+  "properties": {
+    "orchestratorProfile": {
+      "orchestratorType": "Kubernetes"
+    },
+    "masterProfile": {
+      "imageReference": {
+        "name": "linuxvm",
+        "resourceGroup": "sig",
+        "subscriptionID": "00000000-0000-0000-0000-000000000000",
+        "gallery": "siggallery",
+        "version": "0.0.1"
+      },
+      "count": 1,
+      "dnsPrefix": "",
+      "vmSize": "Standard_D2_v3"
+    },
+    "agentPoolProfiles": [
+      {
+        "name": "agentpool1",
+        "count": 3,
+        "imageReference": {
+          "name": "linuxvm",
+          "resourceGroup": "sig",
+          "subscriptionID": "00000000-0000-0000-0000-000000000000",
+          "gallery": "siggallery",
+          "version": "0.0.1"
+        },
+        "vmSize": "Standard_D2_v3",
+        "availabilityProfile": "AvailabilitySet"
+      }
+    ],
+    "linuxProfile": {
+      "adminUsername": "azureuser",
+      "ssh": {
+        "publicKeys": [
+          {
+            "keyData": ""
+          }
+        ]
+      }
+    },
+    "servicePrincipalProfile": {
+      "clientId": "",
+      "secret": ""
+    }
+  }
+}
+```
+
+## Ephemeral OS Disks
+
+> This feature is considered experimental, and you may lose data. We're still evaluating what risks exist and how to mitigate them.
+
+[Ephemeral OS Disks] is a new feature in Azure that allows the OS disk to use local SSD storage, with no writes to Azure storage. If a VM is stopped or deprovisioned, it's local storage is lost. If the same VM is restarted, it starts from the original OS disk and reapplies the custom script extension from AKS-Engine to join the cluster.
+
+Benefits - VMs deploy faster, and have better local storage performance. The OS disk will perform at the _Max cached storage throughput_ for the VM size. For example with a `Standard_D2s_v3` size VM using a 50 GiB OS disk - it can achieve 4000 IOPs with ephemeral disks enabled, or 240 IOPs using a `Premium P6` [Premium SSD](https://docs.microsoft.com/en-us/azure/virtual-machines/linux/disks-types#premium-ssd) at 50GiB. Apps will get faster container and `emptydir` performance. Container pull times are also improved.
+
+Requirements:
+
+- Be sure you are using a VM size that supports cache for the local disk
+- The OS disk size must be set to <= the VM's _cache size in GiB_
+
+These are fully explained in the [Ephemeral OS Disks] docs.
+
+
+We are investigating possible risks & mitigations for when VMs are deprovisioned or moved for Azure maintenance:
+
+- Logs for containers on those nodes are lost.
+- Containers cannot be restarted on the same node, as their container directory and any emptydir volumes will be missing.
+
+
+[Ephemeral OS Disks]: https://docs.microsoft.com/en-us/azure/virtual-machines/windows/ephemeral-os-disks

@@ -20,6 +20,7 @@ The Windows Server deployments default to 30GB for the OS drive (C:), which is n
         "osType": "Windows",
         "osDiskSizeGB": 128
      }
+]
 ```
 
 ### Choosing the Windows Server version
@@ -47,6 +48,21 @@ You can use the Offer, Publisher and Sku to pick a specific version by adding `w
             "windowsPublisher": "MicrosoftWindowsServer",
             "windowsOffer": "WindowsServerSemiAnnual",
             "windowsSku": "Datacenter-Core-1809-with-Containers-smalldisk"
+     },
+```
+
+### Disabling automatic updates
+
+If you want to disable automatic Windows updates, you can use the `enableAutomaticUpdates` option.
+
+```json
+"windowsProfile": {
+            "adminUsername": "azureuser",
+            "adminPassword": "...",
+            "windowsPublisher": "MicrosoftWindowsServer",
+            "windowsOffer": "WindowsServerSemiAnnual",
+            "windowsSku": "Datacenter-Core-1809-with-Containers-smalldisk",
+            "enableAutomaticUpdates": false
      },
 ```
 
@@ -290,7 +306,7 @@ Workaround:
 
 Example:
 
-```json
+```js
 {
     "cniVersion":  "0.3.0",
     "name":  "azure",

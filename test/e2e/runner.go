@@ -20,6 +20,7 @@ import (
 
 var (
 	cfg            *config.Config
+	cccfg          *config.CustomCloudConfig
 	acct           *azure.Account
 	eng            *engine.Engine
 	rgs            []string
@@ -37,17 +38,33 @@ func main() {
 	}
 	cfg.CurrentWorkingDir = cwd
 
+	if cfg.IsAzureStackCloud() {
+		cccfg, err = config.ParseCustomCloudConfig()
+
+		if err != nil {
+			log.Fatalf("Error while trying to parse custom cloud configuration: %s\n", err)
+		}
+		err = cfg.UpdateCustomCloudClusterDefinition(cccfg)
+		if err != nil {
+			log.Fatalf("Error while trying to update  cluster definition: %s\n", cfg.ClusterDefinition)
+		}
+		cccfg.SetEnvironment()
+		if err != nil {
+			log.Fatalf("Error while trying to set environment to azure account! %s\n", err)
+		}
+	}
+
 	acct, err = azure.NewAccount()
 	if err != nil {
 		log.Fatalf("Error while trying to setup azure account: %s\n", err)
 	}
 
-	err := acct.Login()
+	err := acct.LoginWithRetry(3*time.Second, cfg.Timeout)
 	if err != nil {
 		log.Fatalf("Error while trying to login to azure account! %s\n", err)
 	}
 
-	err = acct.SetSubscription()
+	err = acct.SetSubscriptionWithRetry(3*time.Second, cfg.Timeout)
 	if err != nil {
 		log.Fatal("Error while trying to set azure subscription!")
 	}
@@ -77,13 +94,16 @@ func main() {
 			log.Fatalf("Error while trying to set storage account connection string: %s\n", err)
 		}
 		provision := true
+		rgExists := true
 		rg := cfg.SoakClusterName
-		err = acct.SetResourceGroup(rg)
+		err = acct.SetResourceGroupWithRetry(rg, 3*time.Second, 20*time.Second)
 		if err != nil {
+			rgExists = false
 			log.Printf("Error while trying to set RG:%s\n", err)
 		} else {
 			// set expiration time to 7 days = 168h for now
-			d, err := time.ParseDuration("168h")
+			var d time.Duration
+			d, err = time.ParseDuration("168h")
 			if err != nil {
 				log.Fatalf("Unexpected error parsing duration: %s", err)
 			}
@@ -91,8 +111,10 @@ func main() {
 		}
 		if provision || cfg.ForceDeploy {
 			log.Printf("Soak cluster %s does not exist or has expired\n", rg)
-			log.Printf("Deleting Resource Group:%s\n", rg)
-			acct.DeleteGroup(rg, true)
+			if rgExists {
+				log.Printf("Deleting Resource Group:%s\n", rg)
+				acct.DeleteGroupWithRetry(rg, true, 3*time.Second, cfg.Timeout)
+			}
 			log.Printf("Deleting Storage files:%s\n", rg)
 			sa.DeleteFiles(cfg.SoakClusterName)
 			cfg.Name = ""
@@ -102,7 +124,7 @@ func main() {
 			if err != nil {
 				log.Printf("Error while trying to download _output dir: %s, will provision a new cluster.\n", err)
 				log.Printf("Deleting Resource Group:%s\n", rg)
-				acct.DeleteGroup(rg, true)
+				acct.DeleteGroupWithRetry(rg, true, 3*time.Second, cfg.Timeout)
 				log.Printf("Deleting Storage files:%s\n", rg)
 				sa.DeleteFiles(cfg.SoakClusterName)
 				cfg.Name = ""
@@ -121,6 +143,7 @@ func main() {
 				teardown()
 			}
 			log.Fatalf("Error while trying to provision cluster:%s", err)
+			os.Exit(1)
 		}
 		if cfg.SoakClusterName != "" {
 			err = sa.CreateFileShare(cfg.SoakClusterName)
@@ -137,13 +160,19 @@ func main() {
 		engCfg, err := engine.ParseConfig(cfg.CurrentWorkingDir, cfg.ClusterDefinition, cfg.Name)
 		cfg.SetKubeConfig()
 		if err != nil {
-			teardown()
+			if cfg.CleanUpIfFail {
+				teardown()
+			}
 			log.Fatalf("Error trying to parse Engine config:%s\n", err)
+			os.Exit(1)
 		}
 		cs, err := engine.ParseInput(engCfg.ClusterDefinitionTemplate)
 		if err != nil {
-			teardown()
+			if cfg.CleanUpIfFail {
+				teardown()
+			}
 			log.Fatalf("Error trying to parse engine template into memory:%s\n", err)
+			os.Exit(1)
 		}
 		eng = &engine.Engine{
 			Config:            engCfg,
@@ -155,12 +184,17 @@ func main() {
 	if !cfg.SkipTest {
 		g, err := runner.BuildGinkgoRunner(cfg, pt)
 		if err != nil {
-			teardown()
+			if cfg.CleanUpIfFail {
+				teardown()
+			}
 			log.Fatalf("Error: Unable to parse ginkgo configuration!")
+			os.Exit(1)
 		}
 		err = g.Run()
 		if err != nil {
-			teardown()
+			if cfg.CleanUpIfFail {
+				teardown()
+			}
 			os.Exit(1)
 		}
 	}
@@ -220,7 +254,7 @@ func teardown() {
 	if cfg.CleanUpOnExit {
 		for _, rg := range rgs {
 			log.Printf("Deleting Group:%s\n", rg)
-			acct.DeleteGroup(rg, false)
+			acct.DeleteGroupWithRetry(rg, false, 3*time.Second, cfg.Timeout)
 		}
 	}
 }

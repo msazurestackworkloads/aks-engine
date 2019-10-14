@@ -39,8 +39,7 @@ func (cs *ContainerService) setAPIServerConfig() {
 		"--v":                           "4",
 	}
 	// if using local etcd server then we need the ca file
-	/*this ugly if statement is made this way, because this function is used in a test that does not pass correct data structure */
-	if !(nil != cs.Properties && nil != cs.Properties.MasterProfile && to.Bool(cs.Properties.MasterProfile.CosmosEtcd)) {
+	if !(cs.Properties.MasterProfile != nil && cs.Properties.MasterProfile.HasCosmosEtcd()) {
 		staticAPIServerConfig["--etcd-cafile"] = "/etc/kubernetes/certs/ca.crt"
 	}
 
@@ -100,6 +99,11 @@ func (cs *ContainerService) setAPIServerConfig() {
 		}
 	}
 
+	// Disable Weak TLS Cipher Suites for 1.10 and abov
+	if common.IsKubernetesVersionGe(o.OrchestratorVersion, "1.10.0") {
+		defaultAPIServerConfig["--tls-cipher-suites"] = TLSStrongCipherSuitesAPIServer
+	}
+
 	// Set default admission controllers
 	admissionControlKey, admissionControlValues := getDefaultAdmissionControls(cs)
 	defaultAPIServerConfig[admissionControlKey] = admissionControlValues
@@ -113,6 +117,13 @@ func (cs *ContainerService) setAPIServerConfig() {
 			if _, ok := o.KubernetesConfig.APIServerConfig[key]; !ok {
 				// then assign the default value
 				o.KubernetesConfig.APIServerConfig[key] = val
+			} else {
+				// Manual override of "--audit-policy-file" for back-compat
+				if key == "--audit-policy-file" {
+					if o.KubernetesConfig.APIServerConfig[key] == "/etc/kubernetes/manifests/audit-policy.yaml" {
+						o.KubernetesConfig.APIServerConfig[key] = val
+					}
+				}
 			}
 		}
 	}
@@ -159,7 +170,7 @@ func getDefaultAdmissionControls(cs *ContainerService) (string, string) {
 	// Add new version case when applying admission controllers only available in that version or later
 	switch {
 	case common.IsKubernetesVersionGe(o.OrchestratorVersion, "1.9.0"):
-		admissionControlValues = "NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,DefaultTolerationSeconds,MutatingAdmissionWebhook,ValidatingAdmissionWebhook,ResourceQuota,ExtendedResourceToleration"
+		admissionControlValues = "NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,DefaultTolerationSeconds,ValidatingAdmissionWebhook,ResourceQuota,ExtendedResourceToleration"
 	default:
 		admissionControlValues = "NamespaceLifecycle,LimitRanger,ServiceAccount,DefaultStorageClass,ResourceQuota"
 	}

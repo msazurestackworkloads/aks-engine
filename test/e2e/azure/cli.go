@@ -4,18 +4,21 @@
 package azure
 
 import (
+	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
+	"os"
 	"os/exec"
 	"strconv"
 	"time"
 
 	"github.com/Azure/aks-engine/test/e2e/engine"
 	"github.com/Azure/aks-engine/test/e2e/kubernetes/util"
+	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-08-01/network"
 
 	"github.com/kelseyhightower/envconfig"
+	"github.com/pkg/errors"
 )
 
 // Storage provides access to StorageAccount objects
@@ -119,6 +122,34 @@ func (a *Account) Login() error {
 	return nil
 }
 
+// LoginWithRetry invokes Login, retrying up to a timeout
+func (a *Account) LoginWithRetry(sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentLoginWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.Login():
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentLoginWithRetryError = <-ch:
+			if mostRecentLoginWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("LoginWithRetry timed out: %s\n", mostRecentLoginWithRetryError)
+		}
+	}
+}
+
 // SetSubscription will call az account set --subscription for the given Account
 func (a *Account) SetSubscription() error {
 	var cmd *exec.Cmd
@@ -135,6 +166,34 @@ func (a *Account) SetSubscription() error {
 		return err
 	}
 	return nil
+}
+
+// SetSubscriptionWithRetry invokes SetSubscription, retrying up to a timeout
+func (a *Account) SetSubscriptionWithRetry(sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentSetSubscriptionWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.SetSubscription():
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentSetSubscriptionWithRetryError = <-ch:
+			if mostRecentSetSubscriptionWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("SetSubscriptionWithRetry timed out: %s\n", mostRecentSetSubscriptionWithRetryError)
+		}
+	}
 }
 
 // CreateGroup will create a resource group in a given location
@@ -165,6 +224,34 @@ func (a *Account) CreateGroup(name, location string) error {
 	return nil
 }
 
+// CreateGroupWithRetry invokes CreateGroup, retrying up to a timeout
+func (a *Account) CreateGroupWithRetry(name, location string, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentCreateGroupWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.CreateGroup(name, location):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentCreateGroupWithRetryError = <-ch:
+			if mostRecentCreateGroupWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("CreateGroupWithRetry timed out: %s\n", mostRecentCreateGroupWithRetryError)
+		}
+	}
+}
+
 // DeleteGroup deletes a given resource group by name
 func (a *Account) DeleteGroup(name string, wait bool) error {
 	var cmd *exec.Cmd
@@ -184,6 +271,34 @@ func (a *Account) DeleteGroup(name string, wait bool) error {
 		return err
 	}
 	return nil
+}
+
+// DeleteGroupWithRetry invokes DeleteGroup, retrying up to a timeout
+func (a *Account) DeleteGroupWithRetry(name string, wait bool, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentDeleteGroupWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.DeleteGroup(name, wait):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentDeleteGroupWithRetryError = <-ch:
+			if mostRecentDeleteGroupWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("DeleteGroupWithRetry timed out: %s\n", mostRecentDeleteGroupWithRetryError)
+		}
+	}
 }
 
 // CreateDeployment will deploy a cluster to a given resource group using the template and parameters on disk
@@ -225,6 +340,34 @@ func (a *Account) CreateDeployment(name string, e *engine.Engine) error {
 	return nil
 }
 
+// CreateDeploymentWithRetry invokes CreateDeployment, retrying up to a timeout
+func (a *Account) CreateDeploymentWithRetry(name string, e *engine.Engine, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentCreateDeploymentWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.CreateDeployment(name, e):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentCreateDeploymentWithRetryError = <-ch:
+			if mostRecentCreateDeploymentWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("CreateDeploymentWithRetry timed out: %s\n", mostRecentCreateDeploymentWithRetryError)
+		}
+	}
+}
+
 // CreateVnet will create a vnet in a resource group
 func (a *Account) CreateVnet(vnet, addressPrefixes string) error {
 	var cmd *exec.Cmd
@@ -242,6 +385,124 @@ func (a *Account) CreateVnet(vnet, addressPrefixes string) error {
 		return err
 	}
 	return nil
+}
+
+// CreateVnetWithRetry invokes CreateVnet, retrying up to a timeout
+func (a *Account) CreateVnetWithRetry(vnet, addressPrefixes string, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentCreateVnetWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.CreateVnet(vnet, addressPrefixes):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentCreateVnetWithRetryError = <-ch:
+			if mostRecentCreateVnetWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("CreateVnetWithRetry timed out: %s\n", mostRecentCreateVnetWithRetryError)
+		}
+	}
+}
+
+// ListRGRouteTableResult defines a struct for making a multi-value channel result type
+type ListRGRouteTableResult struct {
+	routeTables []network.RouteTable
+	err         error
+}
+
+// ListRGRouteTable will list the route table for a resource group
+func (a *Account) ListRGRouteTable() ListRGRouteTableResult {
+	var cmd *exec.Cmd
+	if a.TimeoutCommands {
+		cmd = exec.Command("timeout", "60", "az", "network", "route-table", "list", "-g",
+			a.ResourceGroup.Name, "-o", "json")
+	} else {
+		cmd = exec.Command("az", "network", "route-table", "list", "-g",
+			a.ResourceGroup.Name, "-o", "json")
+	}
+	util.PrintCommand(cmd)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error while trying to list route table with the following command:\n az network route-table list -g %s -o json | jq -r '.[].id'\n Output:%s\n", a.ResourceGroup.Name, out)
+		return ListRGRouteTableResult{
+			routeTables: nil,
+			err:         err,
+		}
+	}
+	routeTables := []network.RouteTable{}
+	err = json.Unmarshal(out, &routeTables)
+	if err != nil {
+		log.Printf("Error unmarshalling route tables json:%s\n", err)
+		return ListRGRouteTableResult{
+			routeTables: nil,
+			err:         err,
+		}
+	}
+	return ListRGRouteTableResult{
+		routeTables: routeTables,
+		err:         err,
+	}
+}
+
+// AddSubnetsToRouteTable will add the subnets in this cluster config to the VNET route table
+func (a *Account) AddSubnetsToRouteTable(routeTableID, vnetName string, subnets []string) error {
+	for _, subnet := range subnets {
+		var cmd *exec.Cmd
+		if a.TimeoutCommands {
+			cmd = exec.Command("timeout", "60", "az", "network", "vnet", "subnet", "update", "-n", subnet, "-g",
+				a.ResourceGroup.Name, "--vnet-name", vnetName, "--route-table", routeTableID)
+		} else {
+			cmd = exec.Command("az", "network", "vnet", "subnet", "update", "-n", subnet, "-g",
+				a.ResourceGroup.Name, "--vnet-name", vnetName, "--route-table", routeTableID)
+		}
+		util.PrintCommand(cmd)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("Error while trying to add route table to subnet: %s\n", out)
+			return err
+		}
+	}
+	return nil
+}
+
+// GetRGRouteTable continuously calls the Azure API until we get a route table result
+func (a *Account) GetRGRouteTable(timeout time.Duration) (network.RouteTable, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan ListRGRouteTableResult)
+	var mostRecentListRGRouteTableError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.ListRGRouteTable():
+				time.Sleep(5 * time.Second)
+			}
+		}
+	}()
+	for {
+		select {
+		case result := <-ch:
+			mostRecentListRGRouteTableError = result.err
+			if result.err == nil && result.routeTables != nil && len(result.routeTables) == 1 {
+				return result.routeTables[0], nil
+			}
+		case <-ctx.Done():
+			return network.RouteTable{}, mostRecentListRGRouteTableError
+		}
+	}
 }
 
 // CreateSubnet will create a subnet in a vnet in a resource group
@@ -263,6 +524,34 @@ func (a *Account) CreateSubnet(vnet, subnetName, subnetPrefix string) error {
 	return nil
 }
 
+// CreateSubnetWithRetry invokes CreateSubnet, retrying up to a timeout
+func (a *Account) CreateSubnetWithRetry(vnet, subnetName, subnetPrefix string, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentCreateSubnetWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.CreateSubnet(vnet, subnetName, subnetPrefix):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentCreateSubnetWithRetryError = <-ch:
+			if mostRecentCreateSubnetWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("CreateSubnetWithRetry timed out: %s\n", mostRecentCreateSubnetWithRetryError)
+		}
+	}
+}
+
 // RouteTable holds information from running az network route-table list
 type RouteTable struct {
 	ID                string `json:"id"`
@@ -272,36 +561,19 @@ type RouteTable struct {
 	ResourceGroup     string `json:"resourceGroup"`
 }
 
-// UpdateRouteTables is used to updated a vnet with the appropriate route tables
-func (a *Account) UpdateRouteTables(subnet, vnet string) error {
-	var cmd *exec.Cmd
-	if a.TimeoutCommands {
-		cmd = exec.Command("timeout", "60", "az", "network", "route-table", "list", "-g", a.ResourceGroup.Name)
-	} else {
-		cmd = exec.Command("az", "network", "route-table", "list", "-g", a.ResourceGroup.Name)
-	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error while trying to get route table list!\n Output:%s\n", out)
-		return err
-	}
-	rts := []RouteTable{}
-	json.Unmarshal(out, &rts)
+// GetHostsResult is a return struct for GetAsync
+type GetHostsResult struct {
+	Vms []VM
+	Err error
+}
 
-	if a.TimeoutCommands {
-		cmd = exec.Command("timeout", "60", "az", "network", "vnet", "subnet", "update",
-			"-n", subnet, "-g", a.ResourceGroup.Name, "--vnet-name", vnet, "--route-table", rts[0].Name)
-	} else {
-		cmd = exec.Command("az", "network", "vnet", "subnet", "update",
-			"-n", subnet, "-g", a.ResourceGroup.Name, "--vnet-name", vnet, "--route-table", rts[0].Name)
+// GetHostsAsync wraps GetHosts with a struct response for goroutine + channel usage
+func (a *Account) GetHostsAsync(name string) GetHostsResult {
+	vms, err := a.GetHosts(name)
+	return GetHostsResult{
+		Vms: vms,
+		Err: err,
 	}
-	util.PrintCommand(cmd)
-	out, err = cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error while trying to update vnet route tables:%s\n", out)
-		return err
-	}
-	return nil
 }
 
 // GetHosts will get a list of vms in the resource group
@@ -334,6 +606,37 @@ func (a *Account) GetHosts(name string) ([]VM, error) {
 	return v, nil
 }
 
+// GetHostsWithRetry invokes GetHostsAsync, retrying up to a timeout
+func (a *Account) GetHostsWithRetry(name string, sleep, timeout time.Duration) ([]VM, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan GetHostsResult)
+	var mostRecentGetHostsWithRetryError error
+	var vms []VM
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.GetHostsAsync(name):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case result := <-ch:
+			mostRecentGetHostsWithRetryError = result.Err
+			vms = result.Vms
+			if mostRecentGetHostsWithRetryError == nil {
+				return vms, nil
+			}
+		case <-ctx.Done():
+			return nil, errors.Errorf("GetHostsWithRetry timed out: %s\n", mostRecentGetHostsWithRetryError)
+		}
+	}
+}
+
 // SetResourceGroup will set the account resource group
 func (a *Account) SetResourceGroup(name string) error {
 	if a.ResourceGroup.Name != "" {
@@ -363,6 +666,34 @@ func (a *Account) SetResourceGroup(name string) error {
 		return err
 	}
 	return nil
+}
+
+// SetResourceGroupWithRetry invokes SetResourceGroup, retrying up to a timeout
+func (a *Account) SetResourceGroupWithRetry(name string, sleep, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	ch := make(chan error)
+	var mostRecentSetResourceGroupWithRetryError error
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case ch <- a.SetResourceGroup(name):
+				time.Sleep(sleep)
+			}
+		}
+	}()
+	for {
+		select {
+		case mostRecentSetResourceGroupWithRetryError = <-ch:
+			if mostRecentSetResourceGroupWithRetryError == nil {
+				return nil
+			}
+		case <-ctx.Done():
+			return errors.Errorf("SetResourceGroupWithRetry timed out: %s\n", mostRecentSetResourceGroupWithRetryError)
+		}
+	}
 }
 
 // IsClusterExpired will return true if a deployment was created more than t nanoseconds ago, or if timestamp is not found
@@ -460,6 +791,9 @@ func (sa *StorageAccount) UploadFiles(source, destination string) error {
 
 // DownloadFiles will download the output directory from storage
 func (sa *StorageAccount) DownloadFiles(source, destination string) error {
+	if _, err := os.Stat(destination); os.IsNotExist(err) {
+		os.Mkdir(destination, os.ModeDir)
+	}
 	cmd := exec.Command("az", "storage", "file", "download-batch", "--destination", destination, "--source", source, "--account-name", sa.Name, "--connection-string", sa.ConnectionString)
 	util.PrintCommand(cmd)
 	out, err := cmd.CombinedOutput()

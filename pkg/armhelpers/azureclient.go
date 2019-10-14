@@ -19,10 +19,11 @@ import (
 	"github.com/Azure/aks-engine/pkg/engine"
 	"github.com/Azure/azure-sdk-for-go/services/apimanagement/mgmt/2017-03-01/apimanagement"
 	"github.com/Azure/azure-sdk-for-go/services/authorization/mgmt/2015-07-01/authorization"
-	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-04-01/compute"
+	"github.com/Azure/azure-sdk-for-go/services/compute/mgmt/2018-10-01/compute"
 	"github.com/Azure/azure-sdk-for-go/services/graphrbac/1.6/graphrbac"
 	"github.com/Azure/azure-sdk-for-go/services/network/mgmt/2018-08-01/network"
 	"github.com/Azure/azure-sdk-for-go/services/preview/msi/mgmt/2015-08-31-preview/msi"
+	"github.com/Azure/azure-sdk-for-go/services/preview/operationalinsights/mgmt/2015-11-01-preview/operationalinsights"
 	"github.com/Azure/azure-sdk-for-go/services/resources/mgmt/2018-05-01/resources"
 	"github.com/Azure/azure-sdk-for-go/services/storage/mgmt/2018-02-01/storage"
 	"github.com/Azure/go-autorest/autorest"
@@ -65,7 +66,10 @@ type AzureClient struct {
 	virtualMachinesClient           compute.VirtualMachinesClient
 	virtualMachineScaleSetsClient   compute.VirtualMachineScaleSetsClient
 	virtualMachineScaleSetVMsClient compute.VirtualMachineScaleSetVMsClient
+	virtualMachineExtensionsClient  compute.VirtualMachineExtensionsClient
 	disksClient                     compute.DisksClient
+	availabilitySetsClient          compute.AvailabilitySetsClient
+	workspacesClient                operationalinsights.WorkspacesClient
 
 	applicationsClient      graphrbac.ApplicationsClient
 	servicePrincipalsClient graphrbac.ServicePrincipalsClient
@@ -122,11 +126,15 @@ func NewAzureClientWithDeviceAuth(env azure.Environment, subscriptionID string) 
 		if err != nil {
 			log.Warnf("Refresh token failed. Will fallback to device auth. %q", err)
 		} else {
-			graphSpt, err := adal.NewServicePrincipalTokenFromManualToken(*oauthConfig, aksEngineClientID, env.GraphEndpoint, armSpt.Token())
+			var graphSpt *adal.ServicePrincipalToken
+			graphSpt, err = adal.NewServicePrincipalTokenFromManualToken(*oauthConfig, aksEngineClientID, env.GraphEndpoint, armSpt.Token())
 			if err != nil {
 				return nil, err
 			}
-			graphSpt.Refresh()
+			err = graphSpt.Refresh()
+			if err != nil {
+				return nil, err
+			}
 
 			return getClient(env, subscriptionID, tenantID, autorest.NewBearerAuthorizer(armSpt), autorest.NewBearerAuthorizer(graphSpt)), nil
 		}
@@ -341,7 +349,10 @@ func getClient(env azure.Environment, subscriptionID, tenantID string, armAuthor
 		virtualMachinesClient:           compute.NewVirtualMachinesClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
 		virtualMachineScaleSetsClient:   compute.NewVirtualMachineScaleSetsClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
 		virtualMachineScaleSetVMsClient: compute.NewVirtualMachineScaleSetVMsClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
+		virtualMachineExtensionsClient:  compute.NewVirtualMachineExtensionsClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
 		disksClient:                     compute.NewDisksClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
+		availabilitySetsClient:          compute.NewAvailabilitySetsClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
+		workspacesClient:                operationalinsights.NewWorkspacesClientWithBaseURI(env.ResourceManagerEndpoint, subscriptionID),
 
 		applicationsClient:      graphrbac.NewApplicationsClientWithBaseURI(env.GraphEndpoint, tenantID),
 		servicePrincipalsClient: graphrbac.NewServicePrincipalsClientWithBaseURI(env.GraphEndpoint, tenantID),
@@ -360,6 +371,8 @@ func getClient(env azure.Environment, subscriptionID, tenantID string, armAuthor
 	c.virtualMachineScaleSetsClient.Authorizer = armAuthorizer
 	c.virtualMachineScaleSetVMsClient.Authorizer = armAuthorizer
 	c.disksClient.Authorizer = armAuthorizer
+	c.availabilitySetsClient.Authorizer = armAuthorizer
+	c.workspacesClient.Authorizer = armAuthorizer
 
 	c.deploymentsClient.PollingDelay = time.Second * 5
 	c.resourcesClient.PollingDelay = time.Second * 5
@@ -378,6 +391,7 @@ func getClient(env azure.Environment, subscriptionID, tenantID string, armAuthor
 	c.virtualMachineScaleSetsClient.PollingDuration = DefaultARMOperationTimeout
 	c.virtualMachineScaleSetVMsClient.PollingDuration = DefaultARMOperationTimeout
 	c.virtualMachinesClient.PollingDuration = DefaultARMOperationTimeout
+	c.availabilitySetsClient.PollingDuration = DefaultARMOperationTimeout
 
 	c.applicationsClient.Authorizer = graphAuthorizer
 	c.servicePrincipalsClient.Authorizer = graphAuthorizer

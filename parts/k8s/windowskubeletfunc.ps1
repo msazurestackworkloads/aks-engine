@@ -39,7 +39,9 @@ Write-AzureConfig {
         [Parameter(Mandatory = $true)][string]
         $ExcludeMasterFromStandardLB,
         [Parameter(Mandatory = $true)][string]
-        $KubeDir
+        $KubeDir,
+        [Parameter(Mandatory = $true)][string]
+        $TargetEnvironment
     )
 
     if ( -Not $PrimaryAvailabilitySetName -And -Not $PrimaryScaleSetName ) {
@@ -50,6 +52,7 @@ Write-AzureConfig {
 
     $azureConfig = @"
 {
+    "cloud": "$TargetEnvironment",
     "tenantId": "$TenantId",
     "subscriptionId": "$SubscriptionId",
     "aadClientId": "$AADClientId",
@@ -131,29 +134,51 @@ users:
 }
 
 function
+Build-PauseContainer {
+    Param(
+        [Parameter(Mandatory = $true)][string]
+        $WindowsBase,
+        $DestinationTag
+    )
+    # Future work: This needs to build wincat - see https://github.com/Azure/aks-engine/issues/1461
+    "FROM $($WindowsBase)" | Out-File -encoding ascii -FilePath Dockerfile
+    "CMD cmd /c ping -t localhost" | Out-File -encoding ascii -FilePath Dockerfile -Append
+    docker build -t $DestinationTag .
+}
+
+function
 New-InfraContainer {
     Param(
         [Parameter(Mandatory = $true)][string]
-        $KubeDir
+        $KubeDir,
+        $DestinationTag = "kubletwin/pause"
     )
     cd $KubeDir
     $computerInfo = Get-ComputerInfo
-    $windowsBase = if ($computerInfo.WindowsVersion -eq "1709") {
-        "microsoft/nanoserver:1709"
-    }
-    elseif ($computerInfo.WindowsVersion -eq "1803") {
-        "microsoft/nanoserver:1803"
-    }
-    elseif ($computerInfo.WindowsVersion -eq "1809") {
-        "mcr.microsoft.com/windows/nanoserver:1809"
-    }
-    else {
-        "mcr.microsoft.com/nanoserver-insider"
-    }
 
-    "FROM $($windowsBase)" | Out-File -encoding ascii -FilePath Dockerfile
-    "CMD cmd /c ping -t localhost" | Out-File -encoding ascii -FilePath Dockerfile -Append
-    docker build -t kubletwin/pause .
+    # Reference for these tags: curl -L https://mcr.microsoft.com/v2/k8s/core/pause/tags/list
+    # Then docker run --rm mplatform/manifest-tool inspect mcr.microsoft.com/k8s/core/pause:<tag>
+
+    $defaultPauseImage = "mcr.microsoft.com/k8s/core/pause:1.2.0"
+
+    switch ($computerInfo.WindowsVersion) {
+        "1803" { 
+            $imageList = docker images $defaultPauseImage --format "{{.Repository}}:{{.Tag}}"
+            if (-not $imageList) {
+                docker pull $defaultPauseImage                 
+            }
+            docker tag $defaultPauseImage $DestinationTag
+        }
+        "1809" { 
+            $imageList = docker images $defaultPauseImage --format "{{.Repository}}:{{.Tag}}"
+            if (-not $imageList) {
+                docker pull $defaultPauseImage                
+            }
+            docker tag $defaultPauseImage $DestinationTag 
+        }
+        "1903" { Build-PauseContainer -WindowsBase "mcr.microsoft.com/windows/nanoserver:1903" -DestinationTag $DestinationTag}
+        default { Build-PauseContainer -WindowsBase "mcr.microsoft.com/nanoserver-insider" -DestinationTag $DestinationTag}
+    }
 }
 
 
@@ -185,11 +210,6 @@ Get-KubeBinaries {
         [Parameter(Mandatory = $true)][string]
         $KubeBinariesURL
     )
-
-    if ($computerInfo.WindowsVersion -eq "1709") {
-        Write-Log "Server version 1709 does not support using kubernetes binaries in tar file."
-        return
-    }
 
     $tempdir = New-TemporaryDirectory
     $binaryPackage = "$tempdir\k.tar.gz"
@@ -238,6 +258,8 @@ New-NSSMService {
     & "$KubeDir\nssm.exe" set Kubelet AppDirectory $KubeDir
     & "$KubeDir\nssm.exe" set Kubelet AppParameters $KubeletStartFile
     & "$KubeDir\nssm.exe" set Kubelet DisplayName Kubelet
+    & "$KubeDir\nssm.exe" set Kubelet AppRestartDelay 5000
+    & "$KubeDir\nssm.exe" set Kubelet DependOnService docker
     & "$KubeDir\nssm.exe" set Kubelet Description Kubelet
     & "$KubeDir\nssm.exe" set Kubelet Start SERVICE_AUTO_START
     & "$KubeDir\nssm.exe" set Kubelet ObjectName LocalSystem
@@ -413,33 +435,35 @@ if (`$hnsNetwork)
     Remove-HnsNetwork `$hnsNetwork
     # Kill all cni instances & stale data left by cni
     # Cleanup all files related to cni
+    taskkill /IM azure-vnet.exe /f
+    taskkill /IM azure-vnet-ipam.exe /f
     `$cnijson = [io.path]::Combine("$KubeDir", "azure-vnet-ipam.json")
     if ((Test-Path `$cnijson))
     {
         Remove-Item `$cnijson
     }
-    `$cnilock = [io.path]::Combine("$KubeDir", "azure-vnet-ipam.lock")
+    `$cnilock = [io.path]::Combine("$KubeDir", "azure-vnet-ipam.json.lock")
     if ((Test-Path `$cnilock))
     {
         Remove-Item `$cnilock
     }
-    taskkill /IM azure-vnet-ipam.exe /f
 
     `$cnijson = [io.path]::Combine("$KubeDir", "azure-vnet.json")
     if ((Test-Path `$cnijson))
     {
         Remove-Item `$cnijson
     }
-    `$cnilock = [io.path]::Combine("$KubeDir", "azure-vnet.lock")
+    `$cnilock = [io.path]::Combine("$KubeDir", "azure-vnet.json.lock")
     if ((Test-Path `$cnilock))
     {
         Remove-Item `$cnilock
     }
-    taskkill /IM azure-vnet.exe /f
 }
 
 # Restart Kubeproxy, which would wait, until the network is created
 Restart-Service Kubeproxy
+
+`$env:AZURE_ENVIRONMENT_FILEPATH="c:\k\azurestackcloud.json"
 
 $KubeletCommandLine
 
@@ -476,21 +500,13 @@ Update-CNIConfig(`$podCIDR, `$masterSubnetGW)
 "{
     ""cniVersion"": ""0.2.0"",
     ""name"": ""<NetworkMode>"",
-    ""type"": ""wincni.exe"",
+    ""type"": ""win-bridge"",
     ""master"": ""Ethernet"",
-    ""capabilities"": { ""portMappings"": true },
-    ""ipam"": {
-        ""environment"": ""azure"",
-        ""subnet"":""<PODCIDR>"",
-        ""routes"": [{
-        ""GW"":""<PODGW>""
-        }]
-    },
     ""dns"" : {
-    ""Nameservers"" : [ ""<NameServers>"" ],
-    ""Search"" : [ ""<Cluster DNS Suffix or Search Path>"" ]
+        ""Nameservers"" : [ ""<NameServers>"" ],
+        ""Search"" : [ ""<Cluster DNS Suffix or Search Path>"" ]
     },
-    ""AdditionalArgs"" : [
+    ""policies"": [
     {
         ""Name"" : ""EndpointPolicy"", ""Value"" : { ""Type"" : ""OutBoundNAT"", ""ExceptionList"": [ ""<ClusterCIDR>"", ""<MgmtSubnet>"" ] }
     },
@@ -502,14 +518,12 @@ Update-CNIConfig(`$podCIDR, `$masterSubnetGW)
 
     `$configJson = ConvertFrom-Json `$jsonSampleConfig
     `$configJson.name = `$global:NetworkMode.ToLower()
-    `$configJson.ipam.subnet=`$podCIDR
-    `$configJson.ipam.routes[0].GW = `$masterSubnetGW
     `$configJson.dns.Nameservers[0] = `$global:KubeDnsServiceIp
     `$configJson.dns.Search[0] = `$global:KubeDnsSearchPath
 
-    `$configJson.AdditionalArgs[0].Value.ExceptionList[0] = `$global:KubeClusterCIDR
-    `$configJson.AdditionalArgs[0].Value.ExceptionList[1] = `$global:MasterSubnet
-    `$configJson.AdditionalArgs[1].Value.DestinationPrefix  = `$global:KubeServiceCIDR
+    `$configJson.policies[0].Value.ExceptionList[0] = `$global:KubeClusterCIDR
+    `$configJson.policies[0].Value.ExceptionList[1] = `$global:MasterSubnet
+    `$configJson.policies[1].Value.DestinationPrefix  = `$global:KubeServiceCIDR
 
     if (Test-Path `$global:CNIConfig)
     {
@@ -523,6 +537,8 @@ Update-CNIConfig(`$podCIDR, `$masterSubnetGW)
 
 try
 {
+    `$env:AZURE_ENVIRONMENT_FILEPATH="c:\k\azurestackcloud.json"
+
     `$masterSubnetGW = Get-DefaultGateway `$global:MasterSubnet
     `$podCIDR=Get-PodCIDR
     `$podCidrDiscovered=Test-PodCIDR(`$podCIDR)

@@ -25,14 +25,15 @@ import (
 	"github.com/Azure/aks-engine/pkg/api"
 	"github.com/Azure/aks-engine/pkg/api/common"
 	"github.com/Azure/aks-engine/pkg/helpers"
-	"github.com/ghodss/yaml"
 	"github.com/pkg/errors"
+
+	_ "k8s.io/client-go/plugin/pkg/client/auth/azure" // register azure (AD) authentication plugin
 )
 
 var commonTemplateFiles = []string{agentOutputs, agentParams, masterOutputs, iaasOutputs, masterParams, windowsParams}
 var dcosTemplateFiles = []string{dcosBaseFile, dcosAgentResourcesVMAS, dcosAgentResourcesVMSS, dcosAgentVars, dcosMasterResources, dcosMasterVars, dcosParams, dcosWindowsAgentResourcesVMAS, dcosWindowsAgentResourcesVMSS}
 var dcos2TemplateFiles = []string{dcos2BaseFile, dcosAgentResourcesVMAS, dcosAgentResourcesVMSS, dcosAgentVars, dcos2MasterResources, dcos2BootstrapResources, dcos2MasterVars, dcosParams, dcosWindowsAgentResourcesVMAS, dcosWindowsAgentResourcesVMSS, dcos2BootstrapVars, dcos2BootstrapParams}
-var kubernetesTemplateFiles = []string{kubernetesBaseFile, kubernetesAgentResourcesVMAS, kubernetesAgentResourcesVMSS, kubernetesAgentVars, kubernetesMasterResourcesVMAS, kubernetesMasterResourcesVMSS, kubernetesMasterVars, kubernetesParams, kubernetesWinAgentVars, kubernetesWinAgentVarsVMSS}
+var kubernetesParamFiles = []string{armParameters, kubernetesParams, masterParams, agentParams, windowsParams}
 var swarmTemplateFiles = []string{swarmBaseFile, swarmParams, swarmAgentResourcesVMAS, swarmAgentVars, swarmAgentResourcesVMSS, swarmBaseFile, swarmMasterResources, swarmMasterVars, swarmWinAgentResourcesVMAS, swarmWinAgentResourcesVMSS}
 var swarmModeTemplateFiles = []string{swarmBaseFile, swarmParams, swarmAgentResourcesVMAS, swarmAgentVars, swarmAgentResourcesVMSS, swarmBaseFile, swarmMasterResources, swarmMasterVars, swarmWinAgentResourcesVMAS, swarmWinAgentResourcesVMSS}
 
@@ -61,7 +62,7 @@ func GenerateKubeConfig(properties *api.Properties, location string) (string, er
 		properties.OrchestratorProfile.KubernetesConfig != nil &&
 		properties.OrchestratorProfile.KubernetesConfig.PrivateCluster != nil &&
 		to.Bool(properties.OrchestratorProfile.KubernetesConfig.PrivateCluster.Enabled) {
-		if properties.MasterProfile.Count > 1 {
+		if properties.MasterProfile.HasMultipleNodes() {
 			// more than 1 master, use the internal lb IP
 			firstMasterIP := net.ParseIP(properties.MasterProfile.FirstConsecutiveStaticIP).To4()
 			if firstMasterIP == nil {
@@ -105,30 +106,39 @@ func validateDistro(cs *api.ContainerService) bool {
 	// Check Master distro
 	if cs.Properties.MasterProfile != nil && cs.Properties.MasterProfile.Distro == api.RHEL &&
 		(cs.Properties.OrchestratorProfile.OrchestratorType != api.SwarmMode) {
-		log.Fatalf("Orchestrator type %s not suported on RHEL Master", cs.Properties.OrchestratorProfile.OrchestratorType)
+		log.Printf("Orchestrator type %s not suported on RHEL Master", cs.Properties.OrchestratorProfile.OrchestratorType)
 		return false
 	}
 	// Check Agent distros
 	for _, agentProfile := range cs.Properties.AgentPoolProfiles {
 		if agentProfile.Distro == api.RHEL &&
 			(cs.Properties.OrchestratorProfile.OrchestratorType != api.SwarmMode) {
-			log.Fatalf("Orchestrator type %s not suported on RHEL Agent", cs.Properties.OrchestratorProfile.OrchestratorType)
+			log.Printf("Orchestrator type %s not suported on RHEL Agent", cs.Properties.OrchestratorProfile.OrchestratorType)
 			return false
 		}
 	}
 	return true
 }
 
-func generateIPList(count int, firstAddr string) []string {
+// generateConsecutiveIPsList takes a starting IP address and returns a string slice of length "count" of subsequent, consecutive IP addresses
+func generateConsecutiveIPsList(count int, firstAddr string) ([]string, error) {
 	ipaddr := net.ParseIP(firstAddr).To4()
 	if ipaddr == nil {
-		panic(fmt.Sprintf("IPAddr '%s' is an invalid IP address", firstAddr))
+		return nil, errors.Errorf("IPAddr '%s' is an invalid IP address", firstAddr)
+	}
+	if int(ipaddr[3])+count >= 255 {
+		return nil, errors.Errorf("IPAddr '%s' + %d will overflow the fourth octet", firstAddr, count)
 	}
 	ret := make([]string, count)
 	for i := 0; i < count; i++ {
-		ret[i] = fmt.Sprintf("%d.%d.%d.%d", ipaddr[0], ipaddr[1], ipaddr[2], ipaddr[3]+byte(i))
+		nextAddress := fmt.Sprintf("%d.%d.%d.%d", ipaddr[0], ipaddr[1], ipaddr[2], ipaddr[3]+byte(i))
+		ipaddr := net.ParseIP(nextAddress).To4()
+		if ipaddr == nil {
+			return nil, errors.Errorf("IPAddr '%s' is an invalid IP address", nextAddress)
+		}
+		ret[i] = nextAddress
 	}
-	return ret
+	return ret, nil
 }
 
 func addValue(m paramsMap, k string, v interface{}) {
@@ -167,42 +177,29 @@ func addSecret(m paramsMap, k string, v interface{}, encode bool) {
 	addKeyvaultReference(m, k, parts[1], parts[2], parts[4])
 }
 
-// getStorageAccountType returns the support managed disk storage tier for a give VM size
-func getStorageAccountType(sizeName string) (string, error) {
-	spl := strings.Split(sizeName, "_")
-	if len(spl) < 2 {
-		return "", errors.Errorf("Invalid sizeName: %s", sizeName)
-	}
-	capability := spl[1]
-	if strings.Contains(strings.ToLower(capability), "s") {
-		return "Premium_LRS", nil
-	}
-	return "Standard_LRS", nil
-}
-
 func makeMasterExtensionScriptCommands(cs *api.ContainerService) string {
-	copyIndex := "',copyIndex(),'"
-	if cs.Properties.OrchestratorProfile.IsKubernetes() {
-		copyIndex = "',copyIndex(variables('masterOffset')),'"
+	curlCaCertOpt := ""
+	if cs.Properties.IsAzureStackCloud() {
+		curlCaCertOpt = fmt.Sprintf("--cacert %s", AzureStackCaCertLocation)
 	}
 	return makeExtensionScriptCommands(cs.Properties.MasterProfile.PreprovisionExtension,
-		cs.Properties.ExtensionProfiles, copyIndex)
+		curlCaCertOpt, cs.Properties.ExtensionProfiles)
 }
 
 func makeAgentExtensionScriptCommands(cs *api.ContainerService, profile *api.AgentPoolProfile) string {
-	copyIndex := "',copyIndex(),'"
-	if profile.IsAvailabilitySets() {
-		copyIndex = fmt.Sprintf("',copyIndex(variables('%sOffset')),'", profile.Name)
-	}
 	if profile.OSType == api.Windows {
 		return makeWindowsExtensionScriptCommands(profile.PreprovisionExtension,
-			cs.Properties.ExtensionProfiles, copyIndex)
+			cs.Properties.ExtensionProfiles)
+	}
+	curlCaCertOpt := ""
+	if cs.Properties.IsAzureStackCloud() {
+		curlCaCertOpt = fmt.Sprintf("--cacert %s", AzureStackCaCertLocation)
 	}
 	return makeExtensionScriptCommands(profile.PreprovisionExtension,
-		cs.Properties.ExtensionProfiles, copyIndex)
+		curlCaCertOpt, cs.Properties.ExtensionProfiles)
 }
 
-func makeExtensionScriptCommands(extension *api.Extension, extensionProfiles []*api.ExtensionProfile, copyIndex string) string {
+func makeExtensionScriptCommands(extension *api.Extension, curlCaCertOpt string, extensionProfiles []*api.ExtensionProfile) string {
 	var extensionProfile *api.ExtensionProfile
 	for _, eP := range extensionProfiles {
 		if strings.EqualFold(eP.Name, extension.Name) {
@@ -218,11 +215,11 @@ func makeExtensionScriptCommands(extension *api.Extension, extensionProfiles []*
 	extensionsParameterReference := fmt.Sprintf("parameters('%sParameters')", extensionProfile.Name)
 	scriptURL := getExtensionURL(extensionProfile.RootURL, extensionProfile.Name, extensionProfile.Version, extensionProfile.Script, extensionProfile.URLQuery)
 	scriptFilePath := fmt.Sprintf("/opt/azure/containers/extensions/%s/%s", extensionProfile.Name, extensionProfile.Script)
-	return fmt.Sprintf("- sudo /usr/bin/curl --retry 5 --retry-delay 10 --retry-max-time 30 -o %s --create-dirs \"%s\" \n- sudo /bin/chmod 744 %s \n- sudo %s ',%s,' > /var/log/%s-output.log",
-		scriptFilePath, scriptURL, scriptFilePath, scriptFilePath, extensionsParameterReference, extensionProfile.Name)
+	return fmt.Sprintf("- sudo /usr/bin/curl --retry 5 --retry-delay 10 --retry-max-time 30 -o %s --create-dirs %s \"%s\" \n- sudo /bin/chmod 744 %s \n- sudo %s ',%s,' > /var/log/%s-output.log",
+		scriptFilePath, curlCaCertOpt, scriptURL, scriptFilePath, scriptFilePath, extensionsParameterReference, extensionProfile.Name)
 }
 
-func makeWindowsExtensionScriptCommands(extension *api.Extension, extensionProfiles []*api.ExtensionProfile, copyIndex string) string {
+func makeWindowsExtensionScriptCommands(extension *api.Extension, extensionProfiles []*api.ExtensionProfile) string {
 	var extensionProfile *api.ExtensionProfile
 	for _, eP := range extensionProfiles {
 		if strings.EqualFold(eP.Name, extension.Name) {
@@ -335,20 +332,6 @@ func getDCOSDefaultRepositoryURL(orchestratorType string, orchestratorVersion st
 		default:
 			return "https://dcosio.azureedge.net/dcos/stable"
 		}
-	}
-	return ""
-}
-
-func getDCOSCustomDataPublicIPStr(orchestratorType string, masterCount int) string {
-	if orchestratorType == api.DCOS {
-		var buf bytes.Buffer
-		for i := 0; i < masterCount; i++ {
-			buf.WriteString(fmt.Sprintf("reference(variables('masterVMNic')[%d]).ipConfigurations[0].properties.privateIPAddress,", i))
-			if i < (masterCount - 1) {
-				buf.WriteString(`'\\\", \\\"', `)
-			}
-		}
-		return buf.String()
 	}
 	return ""
 }
@@ -619,7 +602,7 @@ func (t *TemplateGenerator) getSingleLineForTemplate(textFilename string, cs *ap
 		return "", err
 	}
 
-	textStr := escapeSingleLine(string(expandedTemplate))
+	textStr := escapeSingleLine(expandedTemplate)
 
 	return textStr, nil
 }
@@ -633,8 +616,8 @@ func escapeSingleLine(escapedStr string) string {
 	return escapedStr
 }
 
-// getBase64CustomScript will return a base64 of the CSE
-func getBase64CustomScript(csFilename string) string {
+// getBase64EncodedGzippedCustomScript will return a base64 of the CSE
+func getBase64EncodedGzippedCustomScript(csFilename string) string {
 	b, err := Asset(csFilename)
 	if err != nil {
 		// this should never happen and this is a bug
@@ -643,31 +626,21 @@ func getBase64CustomScript(csFilename string) string {
 	// translate the parameters
 	csStr := string(b)
 	csStr = strings.Replace(csStr, "\r\n", "\n", -1)
-	return getBase64CustomScriptFromStr(csStr)
+	return getBase64EncodedGzippedCustomScriptFromStr(csStr)
 }
 
-// getBase64CustomScript will return a base64 of the CSE
-func getBase64CustomScriptFromStr(str string) string {
+func getStringFromBase64(str string) (string, error) {
+	decodedBytes, err := base64.StdEncoding.DecodeString(str)
+	return string(decodedBytes), err
+}
+
+// getBase64EncodedGzippedCustomScriptFromStr will return a base64-encoded string of the gzip'd source data
+func getBase64EncodedGzippedCustomScriptFromStr(str string) string {
 	var gzipB bytes.Buffer
 	w := gzip.NewWriter(&gzipB)
 	w.Write([]byte(str))
 	w.Close()
 	return base64.StdEncoding.EncodeToString(gzipB.Bytes())
-}
-
-func getDCOSProvisionScript(script string) string {
-	// add the provision script
-	bp, err := Asset(script)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: %s", err.Error()))
-	}
-
-	provisionScript := string(bp)
-	if strings.Contains(provisionScript, "'") {
-		panic(fmt.Sprintf("BUG: %s may not contain character '", script))
-	}
-
-	return strings.Replace(strings.Replace(provisionScript, "\r\n", "\n", -1), "\n", "\n\n    ", -1)
 }
 
 func getAddonFuncMap(addon api.KubernetesAddon) template.FuncMap {
@@ -718,8 +691,12 @@ func getContainerAddonsString(properties *api.Properties, sourcePath string) str
 		setting := settingsMap[addonName]
 		if setting.isEnabled {
 			var input string
-			if setting.rawScript != "" {
-				input = setting.rawScript
+			if setting.base64Data != "" {
+				var err error
+				input, err = getStringFromBase64(setting.base64Data)
+				if err != nil {
+					return ""
+				}
 			} else {
 				orchProfile := properties.OrchestratorProfile
 				versions := strings.Split(orchProfile.OrchestratorVersion, ".")
@@ -742,49 +719,6 @@ func getContainerAddonsString(properties *api.Properties, sourcePath string) str
 		}
 	}
 	return result
-}
-
-func getDCOSAgentProvisionScript(profile *api.AgentPoolProfile, orchProfile *api.OrchestratorProfile, bootstrapIP string) string {
-	// add the provision script
-	scriptname := dcos2Provision
-	if orchProfile.DcosConfig == nil || orchProfile.DcosConfig.BootstrapProfile == nil {
-		if profile.OSType == api.Windows {
-			scriptname = dcosWindowsProvision
-		} else {
-			scriptname = dcosProvision
-		}
-	}
-
-	bp, err := Asset(scriptname)
-	if err != nil {
-		panic(fmt.Sprintf("BUG: %s", err.Error()))
-	}
-
-	provisionScript := string(bp)
-	if strings.Contains(provisionScript, "'") {
-		panic(fmt.Sprintf("BUG: %s may not contain character '", dcosProvision))
-	}
-
-	// the embedded roleFileContents
-	var roleFileContents string
-	if len(profile.Ports) > 0 {
-		// public agents
-		roleFileContents = "touch /etc/mesosphere/roles/slave_public"
-	} else {
-		roleFileContents = "touch /etc/mesosphere/roles/slave"
-	}
-	provisionScript = strings.Replace(provisionScript, "ROLESFILECONTENTS", roleFileContents, -1)
-	provisionScript = strings.Replace(provisionScript, "BOOTSTRAP_IP", bootstrapIP, -1)
-
-	var b bytes.Buffer
-	b.WriteString(provisionScript)
-	b.WriteString("\n")
-
-	if len(orchProfile.DcosConfig.Registry) == 0 {
-		b.WriteString("rm /etc/docker.tar.gz\n")
-	}
-
-	return strings.Replace(strings.Replace(b.String(), "\r\n", "\n", -1), "\n", "\n\n    ", -1)
 }
 
 func getDCOSMasterProvisionScript(orchProfile *api.OrchestratorProfile, bootstrapIP string) string {
@@ -817,68 +751,6 @@ touch /etc/mesosphere/roles/azure_master`
 	return strings.Replace(strings.Replace(b.String(), "\r\n", "\n", -1), "\n", "\n\n    ", -1)
 }
 
-func getDCOSCustomDataTemplate(orchestratorType, orchestratorVersion string) string {
-	switch orchestratorType {
-	case api.DCOS:
-		switch orchestratorVersion {
-		case common.DCOSVersion1Dot8Dot8:
-			return dcosCustomData188
-		case common.DCOSVersion1Dot9Dot0:
-			return dcosCustomData190
-		case common.DCOSVersion1Dot9Dot8:
-			return dcosCustomData198
-		case common.DCOSVersion1Dot10Dot0:
-			return dcosCustomData110
-		case common.DCOSVersion1Dot11Dot0:
-			return dcos2CustomData1110
-		case common.DCOSVersion1Dot11Dot2:
-			return dcos2CustomData1112
-		}
-	default:
-		// it is a bug to get here
-		panic(fmt.Sprintf("BUG: invalid orchestrator %s", orchestratorType))
-	}
-	return ""
-}
-
-// getSingleLineForTemplate returns the file as a single line for embedding in an arm template
-func getSingleLineDCOSCustomData(orchestratorType, yamlFilename string, masterCount int, replaceMap map[string]string) string {
-	b, err := Asset(yamlFilename)
-	if err != nil {
-		panic(fmt.Sprintf("BUG getting yaml custom data file: %s", err.Error()))
-	}
-	yamlStr := string(b)
-	for k, v := range replaceMap {
-		yamlStr = strings.Replace(yamlStr, k, v, -1)
-	}
-
-	// convert to json
-	jsonBytes, err4 := yaml.YAMLToJSON([]byte(yamlStr))
-	if err4 != nil {
-		panic(fmt.Sprintf("BUG: %s", err4.Error()))
-	}
-	yamlStr = string(jsonBytes)
-
-	// convert to one line
-	yamlStr = strings.Replace(yamlStr, "\\", "\\\\", -1)
-	yamlStr = strings.Replace(yamlStr, "\r\n", "\\n", -1)
-	yamlStr = strings.Replace(yamlStr, "\n", "\\n", -1)
-	yamlStr = strings.Replace(yamlStr, "\"", "\\\"", -1)
-
-	// variable replacement
-	rVariable, e1 := regexp.Compile("{{{([^}]*)}}}")
-	if e1 != nil {
-		panic(fmt.Sprintf("BUG: %s", e1.Error()))
-	}
-	yamlStr = rVariable.ReplaceAllString(yamlStr, "',variables('$1'),'")
-
-	// replace the internal values
-	publicIPStr := getDCOSCustomDataPublicIPStr(orchestratorType, masterCount)
-	yamlStr = strings.Replace(yamlStr, "DCOSCUSTOMDATAPUBLICIPSTR", publicIPStr, -1)
-
-	return yamlStr
-}
-
 func buildYamlFileWithWriteFiles(files []string) string {
 	clusterYamlFile := `#cloud-config
 
@@ -894,9 +766,9 @@ write_files:
 
 	filelines := ""
 	for _, file := range files {
-		b64GzipString := getBase64CustomScript(file)
+		b64GzipString := getBase64EncodedGzippedCustomScript(file)
 		fileNoPath := strings.TrimPrefix(file, "swarm/")
-		filelines = filelines + fmt.Sprintf(writeFileBlock, b64GzipString, fileNoPath)
+		filelines += fmt.Sprintf(writeFileBlock, b64GzipString, fileNoPath)
 	}
 	return fmt.Sprintf(clusterYamlFile, filelines)
 }
@@ -941,50 +813,7 @@ func getKubernetesPodStartIndex(properties *api.Properties) int {
 	return nodeCount + 1
 }
 
-// getLinkedTemplatesForExtensions returns the
-// Microsoft.Resources/deployments for each extension
-//func getLinkedTemplatesForExtensions(properties api.Properties) string {
-func getLinkedTemplatesForExtensions(properties *api.Properties) string {
-	var result string
-
-	extensions := properties.ExtensionProfiles
-	masterProfileExtensions := properties.MasterProfile.Extensions
-	orchestratorType := properties.OrchestratorProfile.OrchestratorType
-
-	for err, extensionProfile := range extensions {
-		_ = err
-
-		masterOptedForExtension, singleOrAll := validateProfileOptedForExtension(extensionProfile.Name, masterProfileExtensions)
-		if masterOptedForExtension {
-			result += ","
-			dta, e := getMasterLinkedTemplateText(properties.MasterProfile, orchestratorType, extensionProfile, singleOrAll)
-			if e != nil {
-				fmt.Println(e.Error())
-				return ""
-			}
-			result += dta
-		}
-
-		for _, agentPoolProfile := range properties.AgentPoolProfiles {
-			poolProfileExtensions := agentPoolProfile.Extensions
-			poolOptedForExtension, singleOrAll := validateProfileOptedForExtension(extensionProfile.Name, poolProfileExtensions)
-			if poolOptedForExtension {
-				result += ","
-				dta, e := getAgentPoolLinkedTemplateText(agentPoolProfile, orchestratorType, extensionProfile, singleOrAll)
-				if e != nil {
-					fmt.Println(e.Error())
-					return ""
-				}
-				result += dta
-			}
-
-		}
-	}
-
-	return result
-}
-
-func getMasterLinkedTemplateText(masterProfile *api.MasterProfile, orchestratorType string, extensionProfile *api.ExtensionProfile, singleOrAll string) (string, error) {
+func getMasterLinkedTemplateText(orchestratorType string, extensionProfile *api.ExtensionProfile, singleOrAll string) (string, error) {
 	extTargetVMNamePrefix := "variables('masterVMNamePrefix')"
 
 	loopCount := "[variables('masterCount')]"
@@ -1137,4 +966,29 @@ func stringInSlice(a string, list []string) bool {
 
 func getSwarmVersions(orchestratorVersion, dockerComposeVersion string) string {
 	return fmt.Sprintf("\"orchestratorVersion\": \"%s\",\n\"dockerComposeVersion\": \"%s\",\n", orchestratorVersion, dockerComposeVersion)
+}
+
+func wrapAsVariableObject(o, v string) string {
+	return fmt.Sprintf("',variables('%s').%s,'", o, v)
+}
+
+func getSSHPublicKeysPowerShell(linuxProfile *api.LinuxProfile) string {
+	str := ""
+	if linuxProfile != nil {
+		lastItem := len(linuxProfile.SSH.PublicKeys) - 1
+		for i, publicKey := range linuxProfile.SSH.PublicKeys {
+			str += `"` + strings.TrimSpace(publicKey.KeyData) + `"`
+			if i < lastItem {
+				str += ", "
+			}
+		}
+	}
+	return str
+}
+
+func getWindowsMasterSubnetARMParam(masterProfile *api.MasterProfile) string {
+	if masterProfile != nil && masterProfile.IsCustomVNET() {
+		return fmt.Sprintf("',parameters('vnetCidr'),'")
+	}
+	return fmt.Sprintf("',parameters('masterSubnet'),'")
 }
