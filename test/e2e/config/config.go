@@ -179,9 +179,8 @@ func (ccc *CustomCloudConfig) SetEnvironment() error {
 	if _, err = os.Stat(azsSelfSignedCaPath); err == nil {
 		// latest dev_image has an azure-cli version that requires python3
 		cmd := exec.Command("/bin/bash", "-c",
-			fmt.Sprintf(`VER=$(python3 -V | grep -o [0-9].[0-9]*. | grep -o [0-9].[0-9]*);
-		CA=/usr/local/lib/python${VER}/dist-packages/certifi/cacert.pem;
-		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, azsSelfSignedCaPath))
+			fmt.Sprintf(`CA=/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem;
+ 		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, azsSelfSignedCaPath))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("output:%s\n", out)
 			return err
