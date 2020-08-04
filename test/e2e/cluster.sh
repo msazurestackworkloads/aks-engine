@@ -135,7 +135,7 @@ docker run --rm \
 -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
 -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
 -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-"${DEV_IMAGE}" make test-kubernetes || exit 1
+"${DEV_IMAGE}" make test-kubernetes
 
 if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ] || [ "${GET_CLUSTER_LOGS}" = "true" ]; then
   # shellcheck disable=SC2012
@@ -261,7 +261,7 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
     -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
     -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
     -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-    ${DEV_IMAGE} make test-kubernetes || exit 1
+    ${DEV_IMAGE} make test-kubernetes
 fi
 
 if [ "${SCALE_CLUSTER}" = "true" ]; then
@@ -331,7 +331,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
     -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
     -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-    ${DEV_IMAGE} make test-kubernetes || exit 1
+    ${DEV_IMAGE} make test-kubernetes
 fi
 
 if [ "${UPGRADE_CLUSTER}" = "true" ]; then
@@ -413,7 +413,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
       -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
       -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
       -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-      ${DEV_IMAGE} make test-kubernetes || exit 1
+      ${DEV_IMAGE} make test-kubernetes
   done
 fi
 
