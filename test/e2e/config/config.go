@@ -44,6 +44,8 @@ type Config struct {
 	ResourceGroup       string `envconfig:"RESOURCE_GROUP" default:""`
 	SoakClusterName     string `envconfig:"SOAK_CLUSTER_NAME" default:""`
 	ForceDeploy         bool   `envconfig:"FORCE_DEPLOY" default:"false"`
+	PublicSSHKey        string `envconfig:"PUBLIC_SSH_KEY" default:""`
+	PrivateSSHKeyPath   string `envconfig:"PRIVATE_SSH_KEY_FILE" default:""`
 	UseDeployCommand    bool   `envconfig:"USE_DEPLOY_COMMAND" default:"false"`
 	GinkgoFocus         string `envconfig:"GINKGO_FOCUS" default:""`
 	GinkgoSkip          string `envconfig:"GINKGO_SKIP" default:""`
@@ -243,6 +245,9 @@ func (c *Config) SetKubeConfig() {
 
 // GetSSHKeyPath will return the absolute path to the ssh private key
 func (c *Config) GetSSHKeyPath() string {
+	if c.PrivateSSHKeyPath != "" {
+		return filepath.Join(c.CurrentWorkingDir, c.PrivateSSHKeyPath)
+	}
 	if c.UseDeployCommand {
 		return filepath.Join(c.CurrentWorkingDir, "_output", c.Name, "azureuser_rsa")
 	}
