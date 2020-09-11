@@ -39,7 +39,7 @@ func (g *Ginkgo) Run() error {
 	g.Point.SetTestStart()
 	// use the test bin rather than compile the directory b/c the compile will happen in a sub dir which is another module
 	testFile := fmt.Sprintf("test/e2e/%s/%s.test", g.Config.Orchestrator, g.Config.Orchestrator)
-	var cmd = exec.Command("ginkgo", "-slowSpecThreshold", "180", "-failFast", "-r", "-v", "--focus", g.Config.GinkgoFocus, "--skip", g.Config.GinkgoSkip, testFile)
+	var cmd = exec.Command("ginkgo", "-slowSpecThreshold", "180", "-r", "-v", "--focus", g.Config.GinkgoFocus, "--skip", g.Config.GinkgoSkip, testFile)
 	util.PrintCommand(cmd)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr

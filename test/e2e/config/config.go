@@ -25,29 +25,30 @@ import (
 
 // Config holds global test configuration
 type Config struct {
-	SkipTest            bool          `envconfig:"SKIP_TEST" default:"false"`
-	SkipLogsCollection  bool          `envconfig:"SKIP_LOGS_COLLECTION" default:"false"`
-	Orchestrator        string        `envconfig:"ORCHESTRATOR" default:"kubernetes"`
-	Name                string        `envconfig:"NAME"`                                                                  // Name allows you to set the name of a cluster already created
-	Location            string        `envconfig:"LOCATION"`                                                              // Location where you want to create the cluster
-	Regions             []string      `envconfig:"REGIONS"`                                                               // A whitelist of availableregions
-	ClusterDefinition   string        `envconfig:"CLUSTER_DEFINITION" required:"true" default:"examples/kubernetes.json"` // ClusterDefinition is the path on disk to the json template these are normally located in examples/
-	CleanUpOnExit       bool          `envconfig:"CLEANUP_ON_EXIT" default:"false"`                                       // if true the tests will clean up rgs when tests finish
-	CleanUpIfFail       bool          `envconfig:"CLEANUP_IF_FAIL" default:"true"`
-	RetainSSH           bool          `envconfig:"RETAIN_SSH" default:"true"`
-	StabilityIterations int           `envconfig:"STABILITY_ITERATIONS"`
-	Timeout             time.Duration `envconfig:"TIMEOUT" default:"20m"`
-	LBTimeout           time.Duration `envconfig:"LB_TIMEOUT" default:"20m"`
-	CurrentWorkingDir   string
-	SoakClusterName     string `envconfig:"SOAK_CLUSTER_NAME"`
-	ForceDeploy         bool   `envconfig:"FORCE_DEPLOY"`
-	UseDeployCommand    bool   `envconfig:"USE_DEPLOY_COMMAND"`
-	GinkgoFocus         string `envconfig:"GINKGO_FOCUS"`
-	GinkgoSkip          string `envconfig:"GINKGO_SKIP"`
-	DebugAfterSuite     bool   `envconfig:"DEBUG_AFTERSUITE" default:"false"`
-	BlockSSHPort        bool   `envconfig:"BLOCK_SSH" default:"false"`
-	AddNodePoolInput    string `envconfig:"ADD_NODE_POOL_INPUT" default:""`
-	TestPVC             bool   `envconfig:"TEST_PVC" default:"false"`
+	SkipTest                bool          `envconfig:"SKIP_TEST" default:"false"`
+	SkipLogsCollection      bool          `envconfig:"SKIP_LOGS_COLLECTION" default:"true"`
+	Orchestrator            string        `envconfig:"ORCHESTRATOR" default:"kubernetes"`
+	Name                    string        `envconfig:"NAME" default:""`                                                       // Name allows you to set the name of a cluster already created
+	Location                string        `envconfig:"LOCATION" default:""`                                                   // Location where you want to create the cluster
+	Regions                 []string      `envconfig:"REGIONS" default:""`                                                    // A list of regions to instruct the runner to randomly choose when provisioning IaaS
+	ClusterDefinition       string        `envconfig:"CLUSTER_DEFINITION" required:"true" default:"examples/kubernetes.json"` // ClusterDefinition is the path on disk to the json template these are normally located in examples/
+	CleanUpOnExit           bool          `envconfig:"CLEANUP_ON_EXIT" default:"false"`                                       // if true the tests will clean up rgs when tests finish
+	CleanUpIfFail           bool          `envconfig:"CLEANUP_IF_FAIL" default:"false"`
+	RetainSSH               bool          `envconfig:"RETAIN_SSH" default:"true"`
+	StabilityIterations     int           `envconfig:"STABILITY_ITERATIONS" default:"3"`
+	Timeout                 time.Duration `envconfig:"TIMEOUT" default:"20m"`
+	LBTimeout               time.Duration `envconfig:"LB_TIMEOUT" default:"20m"`
+	CurrentWorkingDir       string
+	SoakClusterName         string `envconfig:"SOAK_CLUSTER_NAME" default:""`
+	ForceDeploy             bool   `envconfig:"FORCE_DEPLOY" default:"false"`
+	PrivateSSHKeyPath       string `envconfig:"PRIVATE_SSH_KEY_FILE" default:""` //Relative path of the custom Private SSH Key in aks-engine
+	UseDeployCommand        bool   `envconfig:"USE_DEPLOY_COMMAND" default:"false"`
+	GinkgoFocus             string `envconfig:"GINKGO_FOCUS" default:""`
+	GinkgoSkip              string `envconfig:"GINKGO_SKIP" default:""`
+	DebugAfterSuite         bool   `envconfig:"DEBUG_AFTERSUITE" default:"false"`
+	BlockSSHPort            bool   `envconfig:"BLOCK_SSH" default:"false"`
+	AddNodePoolInput        string `envconfig:"ADD_NODE_POOL_INPUT" default:""`
+	TestPVC                 bool   `envconfig:"TEST_PVC" default:"false"`
 }
 
 // CustomCloudConfig holds configurations for custom clould
@@ -163,6 +164,33 @@ func parseVlabsContainerSerice(clusterDefinitionFullPath string) api.VlabsARMCon
 // SetEnvironment will set the cloud context
 func (ccc *CustomCloudConfig) SetEnvironment() error {
 	var cmd *exec.Cmd
+<<<<<<< HEAD
+=======
+	var err error
+
+	// Add to python cert store the self-signed root CA generated by Azure Stack's CI
+	// as azure-cli complains otherwise
+	azsSelfSignedCaPath := "/aks-engine/Certificates.pem"
+	if _, err = os.Stat(azsSelfSignedCaPath); err == nil {
+		// latest dev_image has an azure-cli version that requires python3
+		devImagePython := "python3"
+		// include cacert.pem from python2.7 path for upgrade scenario
+		if _, err := os.Stat("/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem"); err == nil {
+			devImagePython = "python"
+		}
+
+		cmd := exec.Command("/bin/bash", "-c",
+			fmt.Sprintf(`VER=$(%s -V | grep -o [0-9].[0-9]*. | grep -o [0-9].[0-9]*);
+		CA=/usr/local/lib/python${VER}/dist-packages/certifi/cacert.pem;
+		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, devImagePython, azsSelfSignedCaPath))
+
+		if out, err := cmd.CombinedOutput(); err != nil {
+			log.Printf("output:%s\n", out)
+			return err
+		}
+	}
+
+>>>>>>> 1457cb3f2... test: add private key input to e2e suite + keep all junit result files (#3747)
 	environmentName := fmt.Sprintf("AzureStack%v", time.Now().Unix())
 	if ccc.TimeoutCommands {
 		cmd = exec.Command("timeout", "60", "az", "cloud", "register",

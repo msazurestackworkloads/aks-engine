@@ -7,6 +7,9 @@ TMP_BASENAME=$(basename ${TMP_DIR})
 GOPATH="/go"
 WORK_DIR="/aks-engine"
 MASTER_VM_UPGRADE_SKU="${MASTER_VM_UPGRADE_SKU:-Standard_D4_v3}"
+AZURE_ENV="${AZURE_ENV:-AzurePublicCloud}"
+IDENTITY_SYSTEM="${IDENTITY_SYSTEM:-azure_ad}"
+TEST_PVC="${TEST_PVC:-false}"
 mkdir -p _output || exit 1
 
 # Assumes we're running from the git root of aks-engine
@@ -34,6 +37,23 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
 ${ADD_NODE_POOL_INPUT}
 END
 fi
+
+if [ -n "$PRIVATE_SSH_KEY_FILE" ]; then
+  PRIVATE_SSH_KEY_FILE=$(realpath --relative-to=$(pwd) ${PRIVATE_SSH_KEY_FILE})
+fi
+
+function tryExit {
+  if [ "${AZURE_ENV}" != "AzureStackCloud" ]; then
+    exit 1
+  fi
+}
+
+function renameResultsFile {
+  JUNIT_PATH=$(pwd)/test/e2e/kubernetes/junit.xml
+  if [ "${AZURE_ENV}" == "AzureStackCloud" ] && [ -f ${JUNIT_PATH} ]; then
+    mv ${JUNIT_PATH} $(pwd)/test/e2e/kubernetes/${1}-junit.xml
+  fi
+}
 
 echo "Running E2E tests against a cluster built with the following API model:"
 cat ${TMP_DIR}/apimodel-input.json
@@ -82,6 +102,7 @@ docker run --rm \
 -e ORCHESTRATOR=kubernetes \
 -e ORCHESTRATOR_RELEASE="${ORCHESTRATOR_RELEASE}" \
 -e CREATE_VNET="${CREATE_VNET}" \
+-e PRIVATE_SSH_KEY_FILE="${PRIVATE_SSH_KEY_FILE}" \
 -e TIMEOUT="${E2E_TEST_TIMEOUT}" \
 -e LB_TIMEOUT="${LB_TEST_TIMEOUT}" \
 -e KUBERNETES_IMAGE_BASE=$KUBERNETES_IMAGE_BASE \
@@ -106,10 +127,12 @@ docker run --rm \
 -e LOG_ANALYTICS_WORKSPACE_KEY="${LOG_ANALYTICS_WORKSPACE_KEY}" \
 -e CUSTOM_HYPERKUBE_IMAGE="${CUSTOM_HYPERKUBE_IMAGE}" \
 -e IS_JENKINS="${IS_JENKINS}" \
+-e TEST_PVC="${TEST_PVC}" \
 -e SKIP_TEST="${SKIP_TESTS}" \
 -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
 -e GINKGO_SKIP="${GINKGO_SKIP}" \
-"${DEV_IMAGE}" make test-kubernetes || exit 1
+-e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
+"${DEV_IMAGE}" make test-kubernetes || tryExit && renameResultsFile "deploy"
 
 if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ]; then
   # shellcheck disable=SC2012
@@ -131,18 +154,21 @@ if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n 
       done
     done
   fi
-  git reset --hard
-  git remote rm $UPGRADE_FORK
-  git remote add $UPGRADE_FORK https://github.com/$UPGRADE_FORK/aks-engine.git
-  git fetch --prune $UPGRADE_FORK
-  git branch -D $UPGRADE_FORK/$UPGRADE_BRANCH
-  git checkout -b $UPGRADE_FORK/$UPGRADE_BRANCH --track $UPGRADE_FORK/$UPGRADE_BRANCH
-  git pull
-  git log -1
-  docker run --rm \
-    -v $(pwd):${WORK_DIR} \
-    -w ${WORK_DIR} \
-    "${DEV_IMAGE}" make build-binary > /dev/null 2>&1 || exit 1
+  
+  if [ "${UPGRADE_CLUSTER}" = "true" ]; then
+    git reset --hard
+    git remote rm $UPGRADE_FORK
+    git remote add $UPGRADE_FORK https://github.com/$UPGRADE_FORK/aks-engine.git
+    git fetch --prune $UPGRADE_FORK
+    git branch -D $UPGRADE_FORK/$UPGRADE_BRANCH
+    git checkout -b $UPGRADE_FORK/$UPGRADE_BRANCH --track $UPGRADE_FORK/$UPGRADE_BRANCH
+    git pull
+    git log -1
+    docker run --rm \
+      -v $(pwd):${WORK_DIR} \
+      -w ${WORK_DIR} \
+      "${DEV_IMAGE}" make build-binary > /dev/null 2>&1 || exit 1
+  fi
 else
   exit 0
 fi
@@ -190,9 +216,11 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
     -e SKIP_LOGS_COLLECTION=true \
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_DOWN}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
+    -e TEST_PVC="${TEST_PVC}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_ADD_POOL} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
-    ${DEV_IMAGE} make test-kubernetes || exit 1
+    -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "add-node-pool"
 fi
 
 if [ "${SCALE_CLUSTER}" = "true" ]; then
@@ -237,9 +265,11 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e SKIP_LOGS_COLLECTION=true \
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_DOWN}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
+    -e TEST_PVC="${TEST_PVC}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_SCALE_DOWN} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
-    ${DEV_IMAGE} make test-kubernetes || exit 1
+    -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "scale-down"
 fi
 
 if [ "${UPGRADE_CLUSTER}" = "true" ]; then
@@ -296,9 +326,11 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
       -e SKIP_LOGS_COLLECTION=${SKIP_LOGS_COLLECTION}  \
       -e GINKGO_SKIP="${SKIP_AFTER_UPGRADE}" \
       -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
+      -e TEST_PVC="${TEST_PVC}" \
       -e SKIP_TEST=${SKIP_TESTS_AFTER_UPGRADE} \
       -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
-      ${DEV_IMAGE} make test-kubernetes || exit 1
+      -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
+      ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "upgrade"
   done
 fi
 
@@ -344,7 +376,9 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e SKIP_LOGS_COLLECTION=${SKIP_LOGS_COLLECTION} \
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_UP}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
+    -e TEST_PVC="${TEST_PVC}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_SCALE_UP} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
-    ${DEV_IMAGE} make test-kubernetes || exit 1
+    -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "scale-up"
 fi
