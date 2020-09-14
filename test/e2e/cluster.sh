@@ -91,6 +91,7 @@ fi
 
 docker run --rm \
 -v $(pwd):${WORK_DIR} \
+-v /etc/ssl/certs:/etc/ssl/certs
 -w ${WORK_DIR} \
 -e CLUSTER_DEFINITION=${TMP_BASENAME}/apimodel-input.json \
 -e CLIENT_ID="${AZURE_CLIENT_ID}" \
@@ -131,6 +132,7 @@ docker run --rm \
 -e SKIP_TEST="${SKIP_TESTS}" \
 -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
 -e GINKGO_SKIP="${GINKGO_SKIP}" \
+-e API_PROFILE="${API_PROFILE}" \
 -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
 "${DEV_IMAGE}" make test-kubernetes || tryExit && renameResultsFile "deploy"
 
@@ -176,6 +178,7 @@ fi
 if [ -n "$ADD_NODE_POOL_INPUT" ]; then
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
+    -v /etc/ssl/certs:/etc/ssl/certs
     -w ${WORK_DIR} \
     -e RESOURCE_GROUP=$RESOURCE_GROUP \
     -e REGION=$REGION \
@@ -197,6 +200,7 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
+    -v /etc/ssl/certs:/etc/ssl/certs
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -217,6 +221,7 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_DOWN}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
     -e TEST_PVC="${TEST_PVC}" \
+    -e API_PROFILE="${API_PROFILE}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_ADD_POOL} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
     -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
@@ -227,6 +232,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
   for nodepool in $(jq -r  '.properties.agentPoolProfiles[].name' < _output/$RESOURCE_GROUP/apimodel.json); do
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
+      -v /etc/ssl/certs:/etc/ssl/certs
       -w ${WORK_DIR} \
       -e RESOURCE_GROUP=$RESOURCE_GROUP \
       -e REGION=$REGION \
@@ -246,6 +252,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
+    -v /etc/ssl/certs:/etc/ssl/certs
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -266,6 +273,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_DOWN}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
     -e TEST_PVC="${TEST_PVC}" \
+    -e API_PROFILE="${API_PROFILE}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_SCALE_DOWN} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
     -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
@@ -290,6 +298,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
   for ver_target in $UPGRADE_VERSIONS; do
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
+      -v /etc/ssl/certs:/etc/ssl/certs
       -w ${WORK_DIR} \
       -e RESOURCE_GROUP=$RESOURCE_GROUP \
       -e REGION=$REGION \
@@ -307,6 +316,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
 
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
+      -v /etc/ssl/certs:/etc/ssl/certs
       -w ${WORK_DIR} \
       -e CLIENT_ID=${AZURE_CLIENT_ID} \
       -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -327,6 +337,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
       -e GINKGO_SKIP="${SKIP_AFTER_UPGRADE}" \
       -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
       -e TEST_PVC="${TEST_PVC}" \
+      -e API_PROFILE="${API_PROFILE}" \
       -e SKIP_TEST=${SKIP_TESTS_AFTER_UPGRADE} \
       -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
       -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
@@ -338,6 +349,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
   for nodepool in $(jq -r '.properties.agentPoolProfiles[].name' < _output/$RESOURCE_GROUP/apimodel.json); do
     docker run --rm \
     -v $(pwd):${WORK_DIR} \
+    -v /etc/ssl/certs:/etc/ssl/certs
     -w ${WORK_DIR} \
     -e RESOURCE_GROUP=$RESOURCE_GROUP \
     -e REGION=$REGION \
@@ -357,6 +369,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
+    -v /etc/ssl/certs:/etc/ssl/certs
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -377,6 +390,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e GINKGO_SKIP="${SKIP_AFTER_SCALE_UP}" \
     -e GINKGO_FOCUS="${GINKGO_FOCUS}" \
     -e TEST_PVC="${TEST_PVC}" \
+    -e API_PROFILE="${API_PROFILE}" \
     -e SKIP_TEST=${SKIP_TESTS_AFTER_SCALE_UP} \
     -e ADD_NODE_POOL_INPUT=${ADD_NODE_POOL_INPUT} \
     -e IDENTITY_SYSTEM="${IDENTITY_SYSTEM}" \
