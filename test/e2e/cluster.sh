@@ -91,7 +91,7 @@ fi
 
 docker run --rm \
 -v $(pwd):${WORK_DIR} \
--v /etc/ssl/certs:/etc/ssl/certs
+-v /etc/ssl/certs:/etc/ssl/certs \
 -w ${WORK_DIR} \
 -e CLUSTER_DEFINITION=${TMP_BASENAME}/apimodel-input.json \
 -e CLIENT_ID="${AZURE_CLIENT_ID}" \
@@ -178,7 +178,7 @@ fi
 if [ -n "$ADD_NODE_POOL_INPUT" ]; then
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
-    -v /etc/ssl/certs:/etc/ssl/certs
+    -v /etc/ssl/certs:/etc/ssl/certs \
     -w ${WORK_DIR} \
     -e RESOURCE_GROUP=$RESOURCE_GROUP \
     -e REGION=$REGION \
@@ -200,7 +200,7 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
-    -v /etc/ssl/certs:/etc/ssl/certs
+    -v /etc/ssl/certs:/etc/ssl/certs \
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -232,7 +232,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
   for nodepool in $(jq -r  '.properties.agentPoolProfiles[].name' < _output/$RESOURCE_GROUP/apimodel.json); do
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
-      -v /etc/ssl/certs:/etc/ssl/certs
+      -v /etc/ssl/certs:/etc/ssl/certs \
       -w ${WORK_DIR} \
       -e RESOURCE_GROUP=$RESOURCE_GROUP \
       -e REGION=$REGION \
@@ -252,7 +252,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
-    -v /etc/ssl/certs:/etc/ssl/certs
+    -v /etc/ssl/certs:/etc/ssl/certs \
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -298,7 +298,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
   for ver_target in $UPGRADE_VERSIONS; do
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
-      -v /etc/ssl/certs:/etc/ssl/certs
+      -v /etc/ssl/certs:/etc/ssl/certs \
       -w ${WORK_DIR} \
       -e RESOURCE_GROUP=$RESOURCE_GROUP \
       -e REGION=$REGION \
@@ -316,7 +316,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
 
     docker run --rm \
       -v $(pwd):${WORK_DIR} \
-      -v /etc/ssl/certs:/etc/ssl/certs
+      -v /etc/ssl/certs:/etc/ssl/certs \
       -w ${WORK_DIR} \
       -e CLIENT_ID=${AZURE_CLIENT_ID} \
       -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
@@ -349,7 +349,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
   for nodepool in $(jq -r '.properties.agentPoolProfiles[].name' < _output/$RESOURCE_GROUP/apimodel.json); do
     docker run --rm \
     -v $(pwd):${WORK_DIR} \
-    -v /etc/ssl/certs:/etc/ssl/certs
+    -v /etc/ssl/certs:/etc/ssl/certs \
     -w ${WORK_DIR} \
     -e RESOURCE_GROUP=$RESOURCE_GROUP \
     -e REGION=$REGION \
@@ -369,7 +369,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
-    -v /etc/ssl/certs:/etc/ssl/certs
+    -v /etc/ssl/certs:/etc/ssl/certs \
     -w ${WORK_DIR} \
     -e CLIENT_ID=${AZURE_CLIENT_ID} \
     -e CLIENT_SECRET=${AZURE_CLIENT_SECRET} \
