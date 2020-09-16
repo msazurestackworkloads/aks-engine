@@ -49,28 +49,32 @@ type Config struct {
 	BlockSSHPort        bool   `envconfig:"BLOCK_SSH" default:"false"`
 	AddNodePoolInput    string `envconfig:"ADD_NODE_POOL_INPUT" default:""`
 	TestPVC             bool   `envconfig:"TEST_PVC" default:"false"`
+	SubscriptionID      string `envconfig:"SUBSCRIPTION_ID"`
+	ClientID            string `envconfig:"CLIENT_ID"`
+	ClientSecret        string `envconfig:"CLIENT_SECRET"`
 }
 
-// CustomCloudConfig holds configurations for custom clould
+// CustomCloudConfig holds configurations for custom cloud
 type CustomCloudConfig struct {
-	ServiceManagementEndpoint    string `envconfig:"SERVICE_MANAGEMENT_ENDPOINT"`
-	ResourceManagerEndpoint      string `envconfig:"RESOURCE_MANAGER_ENDPOINT"`
-	ActiveDirectoryEndpoint      string `envconfig:"ACTIVE_DIRECTORY_ENDPOINT"`
-	GalleryEndpoint              string `envconfig:"GALLERY_ENDPOINT"`
-	StorageEndpointSuffix        string `envconfig:"STORAGE_ENDPOINT_SUFFIX"`
-	KeyVaultDNSSuffix            string `envconfig:"KEY_VAULT_DNS_SUFFIX"`
-	GraphEndpoint                string `envconfig:"GRAPH_ENDPOINT"`
-	ServiceManagementVMDNSSuffix string `envconfig:"SERVICE_MANAGEMENT_VM_DNS_SUFFIX"`
-	ResourceManagerVMDNSSuffix   string `envconfig:"RESOURCE_MANAGER_VM_DNS_SUFFIX"`
-	IdentitySystem               string `envconfig:"IDENTITY_SYSTEM"`
-	AuthenticationMethod         string `envconfig:"AUTHENTICATION_METHOD"`
-	VaultID                      string `envconfig:"VAULT_ID"`
-	SecretName                   string `envconfig:"SECRET_NAME"`
-	CustomCloudClientID          string `envconfig:"CUSTOM_CLOUD_CLIENT_ID"`
-	CustomCloudSecret            string `envconfig:"CUSTOM_CLOUD_SECRET"`
-	APIProfile                   string `envconfig:"API_PROFILE"`
-	PortalURL                    string `envconfig:"PORTAL_ENDPOINT"`
+	ServiceManagementEndpoint    string `envconfig:"SERVICE_MANAGEMENT_ENDPOINT" default:""`
+	ResourceManagerEndpoint      string `envconfig:"RESOURCE_MANAGER_ENDPOINT" default:""`
+	ActiveDirectoryEndpoint      string `envconfig:"ACTIVE_DIRECTORY_ENDPOINT" default:""`
+	GalleryEndpoint              string `envconfig:"GALLERY_ENDPOINT" default:""`
+	StorageEndpointSuffix        string `envconfig:"STORAGE_ENDPOINT_SUFFIX" default:""`
+	KeyVaultDNSSuffix            string `envconfig:"KEY_VAULT_DNS_SUFFIX" default:""`
+	GraphEndpoint                string `envconfig:"GRAPH_ENDPOINT" default:""`
+	ServiceManagementVMDNSSuffix string `envconfig:"SERVICE_MANAGEMENT_VM_DNS_SUFFIX" default:""`
+	ResourceManagerVMDNSSuffix   string `envconfig:"RESOURCE_MANAGER_VM_DNS_SUFFIX" default:""`
+	IdentitySystem               string `envconfig:"IDENTITY_SYSTEM" default:""`
+	AuthenticationMethod         string `envconfig:"AUTHENTICATION_METHOD" default:""`
+	VaultID                      string `envconfig:"VAULT_ID" default:""`
+	SecretName                   string `envconfig:"SECRET_NAME" default:""`
+	CustomCloudClientID          string `envconfig:"CUSTOM_CLOUD_CLIENT_ID" default:""`
+	CustomCloudSecret            string `envconfig:"CUSTOM_CLOUD_SECRET" default:""`
+	APIProfile                   string `envconfig:"API_PROFILE" default:""`
+	PortalURL                    string `envconfig:"PORTAL_ENDPOINT" default:""`
 	TimeoutCommands              bool
+	CustomCloudName              string `envconfig:"CUSTOM_CLOUD_NAME"`
 }
 
 const (
@@ -109,11 +113,11 @@ func (c *Config) GetKubeConfig() string {
 	return kubeconfigPath
 }
 
-// IsAzureStackCloud returns true if the cloud is AzureStack
-func (c *Config) IsAzureStackCloud() bool {
-	clusterDefinitionFullPath := fmt.Sprintf("%s/%s", c.CurrentWorkingDir, c.ClusterDefinition)
-	cs := parseVlabsContainerSerice(clusterDefinitionFullPath)
-	return cs.Properties.IsAzureStackCloud()
+// IsCustomCloudProfile returns true if the cloud is a custom cloud
+func (c *Config) IsCustomCloudProfile() bool {
+	// c.ClusterDefinition is only set for new deployments
+	// Not for upgrade/scale operations
+	return os.Getenv("CUSTOM_CLOUD_NAME") != ""
 }
 
 // UpdateCustomCloudClusterDefinition updates the cluster definition from environment variables
@@ -171,17 +175,9 @@ func (ccc *CustomCloudConfig) SetEnvironment() error {
 	azsSelfSignedCaPath := "/aks-engine/Certificates.pem"
 	if _, err = os.Stat(azsSelfSignedCaPath); err == nil {
 		// latest dev_image has an azure-cli version that requires python3
-		devImagePython := "python3"
-		// include cacert.pem from python2.7 path for upgrade scenario
-		if _, err := os.Stat("/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem"); err == nil {
-			devImagePython = "python"
-		}
-
 		cmd := exec.Command("/bin/bash", "-c",
-			fmt.Sprintf(`VER=$(%s -V | grep -o [0-9].[0-9]*. | grep -o [0-9].[0-9]*);
-		CA=/usr/local/lib/python${VER}/dist-packages/certifi/cacert.pem;
-		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, devImagePython, azsSelfSignedCaPath))
-
+			fmt.Sprintf(`CA=/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem;
+ 		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, azsSelfSignedCaPath))
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("output:%s\n", out)
 			return err
@@ -208,36 +204,27 @@ func (ccc *CustomCloudConfig) SetEnvironment() error {
 			"--endpoint-active-directory", ccc.ActiveDirectoryEndpoint,
 			"--endpoint-active-directory-graph-resource-id", ccc.GraphEndpoint)
 	}
-	out, err := cmd.CombinedOutput()
-	if err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("output:%s\n", out)
 		return err
 	}
 
 	if ccc.TimeoutCommands {
-		cmd = exec.Command("timeout", "60", "az", "cloud", "set",
-			"-n", environmentName)
-
+		cmd = exec.Command("timeout", "60", "az", "cloud", "set", "-n", environmentName)
 	} else {
-		cmd = exec.Command("az", "cloud", "set",
-			"-n", environmentName)
+		cmd = exec.Command("az", "cloud", "set", "-n", environmentName)
 	}
-	out, err = cmd.CombinedOutput()
-	if err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("output:%s\n", out)
 		return err
 	}
 
 	if ccc.TimeoutCommands {
-		cmd = exec.Command("timeout", "60", "az", "cloud", "update",
-			"--profile", ccc.APIProfile)
-
+		cmd = exec.Command("timeout", "60", "az", "cloud", "update", "--profile", ccc.APIProfile)
 	} else {
-		cmd = exec.Command("az", "cloud", "update",
-			"--profile", ccc.APIProfile)
+		cmd = exec.Command("az", "cloud", "update", "--profile", ccc.APIProfile)
 	}
-	out, err = cmd.CombinedOutput()
-	if err != nil {
+	if out, err := cmd.CombinedOutput(); err != nil {
 		log.Printf("output:%s\n", out)
 		return err
 	}
@@ -253,6 +240,9 @@ func (c *Config) SetKubeConfig() {
 
 // GetSSHKeyPath will return the absolute path to the ssh private key
 func (c *Config) GetSSHKeyPath() string {
+	if c.PrivateSSHKeyPath != "" {
+		return filepath.Join(c.CurrentWorkingDir, c.PrivateSSHKeyPath)
+	}
 	if c.UseDeployCommand {
 		return filepath.Join(c.CurrentWorkingDir, "_output", c.Name, "azureuser_rsa")
 	}
