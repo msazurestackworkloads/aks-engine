@@ -785,7 +785,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 			Expect(err).NotTo(HaveOccurred())
 		})
 
-		/*It("should be able to schedule a pod to a master node", func() {
+		It("should be able to schedule a pod to a master node", func() {
 			By("Creating a Job with master nodeSelector")
 			j, err := job.CreateJobFromFileDeleteIfExists(filepath.Join(WorkloadDir, "busybox-master.yaml"), "busybox-master", "default", 3*time.Second, cfg.Timeout)
 			Expect(err).NotTo(HaveOccurred())
@@ -833,7 +833,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 			successes, err = pod.RunCommandMultipleTimes(pod.RunLinuxPod, "byrnedo/alpine-curl", name, command, cfg.StabilityIterations, 1*time.Second, stabilityCommandTimeout, retryCommandsTimeout)
 			Expect(err).NotTo(HaveOccurred())
 			Expect(successes).To(Equal(cfg.StabilityIterations))
-		})*/
+		})
 
 		It("should have stable internal container networking as we recycle a bunch of pods", func() {
 			name := fmt.Sprintf("alpine-%s", cfg.Name)
@@ -1046,7 +1046,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 			}
 		})
 
-		/*It("should have the correct storage classes deployed", func() {
+		It("should have the correct storage classes deployed", func() {
 			if util.IsUsingEphemeralDisks(eng.ExpandedDefinition.Properties.AgentPoolProfiles) {
 				Skip("no storage class is deployed when ephemeral disk is used, will not test")
 			}
@@ -1094,7 +1094,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 				Expect(sc.Provisioner).To(Equal(azureFileProvisioner))
 				Expect(sc.VolumeBindingMode).To(Equal("Immediate"))
 			}
-		})*/
+		})
 
 		It("should be able to kubectl port-forward to a running pod", func() {
 			deploymentNamespace := "default"
@@ -1827,7 +1827,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 					Skip("No windows agent was provisioned for this Cluster Definition")
 				}
 			})*/
-		/*It("should be able to attach azure file", func() {
+		It("should be able to attach azure file", func() {
 			if eng.HasWindowsAgents() {
 				orchestratorVersion := eng.ExpandedDefinition.Properties.OrchestratorProfile.OrchestratorVersion
 				if orchestratorVersion == "1.11.0" {
@@ -1885,7 +1885,7 @@ var _ = Describe("Azure Container Cluster using the Kubernetes Orchestrator", fu
 			} else {
 				Skip("No windows agent was provisioned for this Cluster Definition")
 			}
-		})*/
+		})
 	})
 
 	Describe("after the cluster has been up for awhile", func() {

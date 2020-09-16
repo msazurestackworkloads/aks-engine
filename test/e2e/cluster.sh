@@ -157,7 +157,7 @@ docker run --rm \
 -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
 "${DEV_IMAGE}" make test-kubernetes || tryExit && renameResultsFile "deploy"
 
-if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ] || [ "${GET_CLUSTER_LOGS}" = "true" ]; then
+if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ]; then
   # shellcheck disable=SC2012
   RESOURCE_GROUP=$(ls -dt1 _output/* | head -n 1 | cut -d/ -f2)
   docker run --rm \
@@ -171,23 +171,6 @@ if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n 
   API_SERVER="$RESOURCE_GROUP.$REGION.cloudapp.azure.com"
   if [ "${AZURE_ENV}" = "AzureStackCloud" ]; then
     API_SERVER="$RESOURCE_GROUP.$REGION.$RESOURCE_MANAGER_VM_DNS_SUFFIX"
-  fi
-
-  if [ "${GET_CLUSTER_LOGS}" = "true" ]; then
-      PRIVATE_SSH_KEY_FILE="${PRIVATE_SSH_KEY_FILE:-_output/${RESOURCE_GROUP}-ssh}"
-      docker run --rm \
-      -v $(pwd):${WORK_DIR} \
-      -w ${WORK_DIR} \
-      -e RESOURCE_GROUP=$RESOURCE_GROUP \
-      -e REGION=$REGION \
-      ${DEV_IMAGE} \
-      ./bin/aks-engine get-logs \
-      --api-model _output/$RESOURCE_GROUP/apimodel.json \
-      --location $REGION \
-      --ssh-host $API_SERVER \
-      --linux-ssh-private-key $PRIVATE_SSH_KEY_FILE \
-      --linux-script ./scripts/collect-logs.sh
-      # TODO remove --linux-script once collect-logs.sh is part of the VHD
   fi
 
   if [ $(( RANDOM % 4 )) -eq 3 ]; then
