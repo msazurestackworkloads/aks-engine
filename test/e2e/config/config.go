@@ -36,20 +36,15 @@ type Config struct {
 	CleanUpIfFail       bool          `envconfig:"CLEANUP_IF_FAIL" default:"false"`
 	RetainSSH           bool          `envconfig:"RETAIN_SSH" default:"true"`
 	StabilityIterations int           `envconfig:"STABILITY_ITERATIONS" default:"3"`
-	ClusterInitPodName  string        `envconfig:"CLUSTER_INIT_POD_NAME" default:""`
-	ClusterInitJobName  string        `envconfig:"CLUSTER_INIT_JOB_NAME" default:""`
 	Timeout             time.Duration `envconfig:"TIMEOUT" default:"20m"`
 	LBTimeout           time.Duration `envconfig:"LB_TIMEOUT" default:"20m"`
 	CurrentWorkingDir   string
-	ResourceGroup       string `envconfig:"RESOURCE_GROUP" default:""`
 	SoakClusterName     string `envconfig:"SOAK_CLUSTER_NAME" default:""`
 	ForceDeploy         bool   `envconfig:"FORCE_DEPLOY" default:"false"`
-	PublicSSHKey        string `envconfig:"PUBLIC_SSH_KEY" default:""`
-	PrivateSSHKeyPath   string `envconfig:"PRIVATE_SSH_KEY_FILE" default:""`
+	PrivateSSHKeyPath   string `envconfig:"PRIVATE_SSH_KEY_FILE" default:""` //Relative path of the custom Private SSH Key in aks-engine
 	UseDeployCommand    bool   `envconfig:"USE_DEPLOY_COMMAND" default:"false"`
 	GinkgoFocus         string `envconfig:"GINKGO_FOCUS" default:""`
 	GinkgoSkip          string `envconfig:"GINKGO_SKIP" default:""`
-	GinkgoFailFast      bool   `envconfig:"GINKGO_FAIL_FAST" default:"true"`
 	DebugAfterSuite     bool   `envconfig:"DEBUG_AFTERSUITE" default:"false"`
 	BlockSSHPort        bool   `envconfig:"BLOCK_SSH" default:"false"`
 	AddNodePoolInput    string `envconfig:"ADD_NODE_POOL_INPUT" default:""`
@@ -180,9 +175,17 @@ func (ccc *CustomCloudConfig) SetEnvironment() error {
 	azsSelfSignedCaPath := "/aks-engine/Certificates.pem"
 	if _, err = os.Stat(azsSelfSignedCaPath); err == nil {
 		// latest dev_image has an azure-cli version that requires python3
+		devImagePython := "python3"
+		// include cacert.pem from python2.7 path for upgrade scenario
+		if _, err := os.Stat("/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem"); err == nil {
+			devImagePython = "python"
+		}
+
 		cmd := exec.Command("/bin/bash", "-c",
-			fmt.Sprintf(`CA=/usr/local/lib/python2.7/dist-packages/certifi/cacert.pem;
- 		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, azsSelfSignedCaPath))
+			fmt.Sprintf(`VER=$(%s -V | grep -o [0-9].[0-9]*. | grep -o [0-9].[0-9]*);
+		CA=/usr/local/lib/python${VER}/dist-packages/certifi/cacert.pem;
+		if [ -f ${CA} ]; then cat %s >> ${CA}; fi;`, devImagePython, azsSelfSignedCaPath))
+
 		if out, err := cmd.CombinedOutput(); err != nil {
 			log.Printf("output:%s\n", out)
 			return err

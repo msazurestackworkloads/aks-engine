@@ -9,7 +9,6 @@ WORK_DIR="/aks-engine"
 MASTER_VM_UPGRADE_SKU="${MASTER_VM_UPGRADE_SKU:-Standard_D4_v3}"
 AZURE_ENV="${AZURE_ENV:-AzurePublicCloud}"
 IDENTITY_SYSTEM="${IDENTITY_SYSTEM:-azure_ad}"
-GINKGO_FAIL_FAST="${GINKGO_FAIL_FAST:-false}"
 TEST_PVC="${TEST_PVC:-false}"
 mkdir -p _output || exit 1
 
@@ -42,13 +41,22 @@ ${ADD_NODE_POOL_INPUT}
 END
 fi
 
-if [ -n "$PUBLIC_SSH_KEY_FILE" ]; then
-  PUBLIC_SSH_KEY=$(cat "${PUBLIC_SSH_KEY_FILE}")
-fi
-
 if [ -n "$PRIVATE_SSH_KEY_FILE" ]; then
   PRIVATE_SSH_KEY_FILE=$(realpath --relative-to=$(pwd) ${PRIVATE_SSH_KEY_FILE})
 fi
+
+function tryExit {
+  if [ "${AZURE_ENV}" != "AzureStackCloud" ]; then
+    exit 1
+  fi
+}
+
+function renameResultsFile {
+  JUNIT_PATH=$(pwd)/test/e2e/kubernetes/junit.xml
+  if [ "${AZURE_ENV}" == "AzureStackCloud" ] && [ -f ${JUNIT_PATH} ]; then
+    mv ${JUNIT_PATH} $(pwd)/test/e2e/kubernetes/${1}-junit.xml
+  fi
+}
 
 echo "Running E2E tests against a cluster built with the following API model:"
 cat ${TMP_DIR}/apimodel-input.json
@@ -98,7 +106,6 @@ docker run --rm \
 -e ORCHESTRATOR=kubernetes \
 -e ORCHESTRATOR_RELEASE="${ORCHESTRATOR_RELEASE}" \
 -e CREATE_VNET="${CREATE_VNET}" \
--e PUBLIC_SSH_KEY="${PUBLIC_SSH_KEY}" \
 -e PRIVATE_SSH_KEY_FILE="${PRIVATE_SSH_KEY_FILE}" \
 -e TIMEOUT="${E2E_TEST_TIMEOUT}" \
 -e LB_TIMEOUT="${LB_TEST_TIMEOUT}" \
@@ -148,9 +155,7 @@ docker run --rm \
 -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
 -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
 -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-"${DEV_IMAGE}" make test-kubernetes
-
-sudo mv $(pwd)/test/e2e/kubernetes/junit.xml $(pwd)/test/e2e/kubernetes/deploy-junit.xml
+"${DEV_IMAGE}" make test-kubernetes || tryExit && renameResultsFile "deploy"
 
 if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ] || [ "${GET_CLUSTER_LOGS}" = "true" ]; then
   # shellcheck disable=SC2012
@@ -281,7 +286,7 @@ if [ -n "$ADD_NODE_POOL_INPUT" ]; then
     -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
     -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
     -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-    ${DEV_IMAGE} make test-kubernetes
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "add-node-pool"
 fi
 
 if [ "${SCALE_CLUSTER}" = "true" ]; then
@@ -353,9 +358,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
     -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
     -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-    ${DEV_IMAGE} make test-kubernetes
-
-    sudo mv $(pwd)/test/e2e/kubernetes/junit.xml $(pwd)/test/e2e/kubernetes/scale-down-junit.xml
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "scale-down"
 fi
 
 if [ "${UPGRADE_CLUSTER}" = "true" ]; then
@@ -439,9 +442,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
       -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
       -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
       -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-      ${DEV_IMAGE} make test-kubernetes
-
-      sudo mv $(pwd)/test/e2e/kubernetes/junit.xml $(pwd)/test/e2e/kubernetes/upgrade-junit.xml
+      ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "upgrade"
   done
 fi
 
@@ -514,7 +515,5 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     -e SERVICE_MANAGEMENT_VM_DNS_SUFFIX="${SERVICE_MANAGEMENT_VM_DNS_SUFFIX}" \
     -e RESOURCE_MANAGER_VM_DNS_SUFFIX="${RESOURCE_MANAGER_VM_DNS_SUFFIX}" \
     -e STABILITY_ITERATIONS=${STABILITY_ITERATIONS} \
-    ${DEV_IMAGE} make test-kubernetes
-
-    sudo mv $(pwd)/test/e2e/kubernetes/junit.xml $(pwd)/test/e2e/kubernetes/scale-up-junit.xml
+    ${DEV_IMAGE} make test-kubernetes || tryExit && renameResultsFile "scale-up"
 fi
