@@ -134,6 +134,7 @@ func (cli *CLIProvisioner) provision() error {
 		if err != nil {
 			return errors.Wrap(err, "Error while generating ssh keys")
 		}
+		os.Setenv("PUBLIC_SSH_KEY", publicSSHKey)
 	}
 
 	os.Setenv("DNS_PREFIX", cli.Config.Name)
