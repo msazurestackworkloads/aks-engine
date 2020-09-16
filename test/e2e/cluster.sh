@@ -302,6 +302,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
       --node-pool $nodepool \
       --new-node-count 1 \
       --auth-method client_secret \
+      --identity-system ${IDENTITY_SYSTEM}\
       --client-id ${AZURE_CLIENT_ID} \
       --client-secret ${AZURE_CLIENT_SECRET} || exit 1
   done
@@ -384,6 +385,7 @@ if [ "${UPGRADE_CLUSTER}" = "true" ]; then
       --upgrade-version $ver_target \
       --vm-timeout 20 \
       --auth-method client_secret \
+      --identity-system ${IDENTITY_SYSTEM} \
       --client-id ${AZURE_CLIENT_ID} \
       --client-secret ${AZURE_CLIENT_SECRET} || exit 1
 
@@ -453,6 +455,7 @@ if [ "${SCALE_CLUSTER}" = "true" ]; then
     --node-pool $nodepool \
     --new-node-count $NODE_COUNT \
     --auth-method client_secret \
+    --identity-system ${IDENTITY_SYSTEM}\
     --client-id ${AZURE_CLIENT_ID} \
     --client-secret ${AZURE_CLIENT_SECRET} || exit 1
   done
