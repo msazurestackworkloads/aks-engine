@@ -80,6 +80,7 @@ function rotateCertificates {
     --client-id ${AZURE_CLIENT_ID} \
     --client-secret ${AZURE_CLIENT_SECRET} \
     --subscription-id ${AZURE_SUBSCRIPTION_ID} \
+    --azure-env ${AZURE_ENV} \
     --debug
 
   # Retry if it fails the first time (validate --certificate-profile instead of regenerating a new set of certs)
