@@ -120,7 +120,7 @@ echo "Running E2E tests against a cluster built with the following API model:"
 cat ${TMP_DIR}/apimodel-input.json
 
 CLEANUP_AFTER_DEPLOYMENT=${CLEANUP_ON_EXIT}
-if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ]; then
+if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ] || [ "${ROTATE_CERTS}" = "true" ]; then
   CLEANUP_AFTER_DEPLOYMENT="false"
 fi
 
@@ -305,6 +305,10 @@ if [ "${ROTATE_CERTS}" = "true" ]; then
   SKIP_AFTER_ROTATE_CERTS="should be able to autoscale"
   SKIP_AFTER_SCALE_DOWN="${SKIP_AFTER_SCALE_DOWN}|should be able to autoscale"
   SKIP_AFTER_SCALE_UP="${SKIP_AFTER_SCALE_DOWN}|should be able to autoscale"
+  CLEANUP_AFTER_ROTATE_CERTS=${CLEANUP_ON_EXIT}
+  if [ "${UPGRADE_CLUSTER}" = "true" ] || [ "${SCALE_CLUSTER}" = "true" ] || [ -n "$ADD_NODE_POOL_INPUT" ]; then
+    CLEANUP_AFTER_ROTATE_CERTS="false"
+  fi
 
   docker run --rm \
     -v $(pwd):${WORK_DIR} \
@@ -322,7 +326,7 @@ if [ "${ROTATE_CERTS}" = "true" ]; then
     -e LB_TIMEOUT=${LB_TEST_TIMEOUT} \
     -e KUBERNETES_IMAGE_BASE=$KUBERNETES_IMAGE_BASE \
     -e KUBERNETES_IMAGE_BASE_TYPE=$KUBERNETES_IMAGE_BASE_TYPE \
-    -e CLEANUP_ON_EXIT=false \
+    -e CLEANUP_ON_EXIT=${CLEANUP_AFTER_ROTATE_CERTS} \
     -e REGIONS=$REGION \
     -e IS_JENKINS=${IS_JENKINS} \
     -e SKIP_LOGS_COLLECTION=true \
