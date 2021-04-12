@@ -81,6 +81,7 @@ function rotateCertificates {
     --client-secret ${AZURE_CLIENT_SECRET} \
     --subscription-id ${AZURE_SUBSCRIPTION_ID} \
     --azure-env ${AZURE_ENV} \
+    --identity-system ${IDENTITY_SYSTEM} \
     --debug
 
   # Retry if it fails the first time (validate --certificate-profile instead of regenerating a new set of certs)
@@ -110,6 +111,8 @@ function rotateCertificates {
       --client-secret ${AZURE_CLIENT_SECRET} \
       --subscription-id ${AZURE_SUBSCRIPTION_ID} \
       --certificate-profile _output/${RESOURCE_GROUP}/certificateProfile.json --force \
+      --azure-env ${AZURE_ENV} \
+      --identity-system ${IDENTITY_SYSTEM} \
       --debug
 
     exit $?
