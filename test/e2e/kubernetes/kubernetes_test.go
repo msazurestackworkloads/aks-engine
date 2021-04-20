@@ -56,7 +56,7 @@ const (
 	sleepBetweenRetriesWhenWaitingForPodReady = 1 * time.Second
 	sleepBetweenRetriesRemoteSSHCommand       = 3 * time.Second
 	timeoutWhenWaitingForPodOutboundAccess    = 1 * time.Minute
-	singleCommandTimeout                      = 1 * time.Minute
+	singleCommandTimeout                      = 2 * time.Minute
 	validateNetworkPolicyTimeout              = 3 * time.Minute
 	podLookupRetries                          = 5
 )
